@@ -51,6 +51,12 @@ public:
 
     // Метод диспетчеризации входящих системных MsgPack-объектов
     static void dispatchIncomingPacket(const msgpack::object& obj);
+
+    // --- Управление состоянием процесса ---
+    static bool isDeviceBusy();
+    static void startProcess(uint32_t threadId);
+    static void watchProcess(const std::string& state, const std::string& thread);
+
 };
 
 extern MsgParser parser;

@@ -8,6 +8,7 @@
 
 WSclient wsclient;
 MsgParser parser;
+MsgParser::RunningProcess runningProc;
 
 static struct lws_protocols protocols[] = {
     { "qos2-protocol", WSclient::callbackQos2Client, 0, 0, 0, nullptr, 0 },

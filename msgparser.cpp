@@ -112,9 +112,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
         std::cout << "[MsgParser] Обработка шага процесса '" << thread << "' -> Статус: " << state << std::endl;
 
-        if (state == "OK") {
-            //std::cout << "[MsgParser] >>> СЕССИЯ ИНИЦИАЛИЗАЦИИ БЛАГОПОЛУЧНО ЗАВЕРШЕНА <<<" << std::endl;
-        }
+        watchProcess(state, thread);
     }
 }
 
@@ -208,5 +206,42 @@ void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage
 
     parser.packMessage(pumsg);
     //return pumsg.packedMsg;
+}
+
+// =========================================================================
+// УПРАВЛЕНИЕ СОСТОЯНИЕМ ПРОЦЕССА
+// =========================================================================
+
+bool MsgParser::isDeviceBusy() {
+    return runningProc.running;
+}
+
+void MsgParser::startProcess(uint32_t threadId) {
+    runningProc.thread = threadId;
+    runningProc.running = true;
+    std::cout << "[Process] Новый процесс " << runningProc.thread << " зарегистрирован как активный." << std::endl;
+}
+
+void MsgParser::watchProcess(const std::string& state, const std::string& thread) {
+    if (!runningProc.running) {
+        return; // Ничего не отслеживаем, выходим
+    }
+
+    // Преобразуем числовой ID в строку для безопасного сравнения
+    std::string trackedThreadStr = std::to_string(runningProc.thread);
+
+    if (trackedThreadStr == thread) {
+        if (state == "WORK") {
+            std::cout << "[Process] Процесс '" << thread << "' выполняется (WORK)..." << std::endl;
+        }
+        else if (state == "OK") {
+            std::cout << "[Process] >>> Процесс '" << thread << "' успешно завершен (OK)! <<<" << std::endl;
+            runningProc.running = false; // Освобождаем устройство
+        }
+        else if (state == "FAIL") {
+            std::cerr << "[Process] !!! Процесс '" << thread << "' завершился с ошибкой (FAIL)! <<<" << std::endl;
+            runningProc.running = false; // Освобождаем устройство даже при ошибке, чтобы избежать deadlock
+        }
+    }
 }
 
