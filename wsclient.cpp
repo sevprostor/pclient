@@ -1,7 +1,8 @@
 #include "wsclient.h"
+
 #include <iostream>
 
-MsgParser parser;
+//MsgParser parser;
 
 // 1. Инициализация контекста внутри класса
 void WSclient::initContext() {
@@ -32,25 +33,17 @@ void WSclient::sendSuccess(struct lws *wsi_param) {
     std::cout << "[QoS2] Отправлен байт 'S' (Подтверждение для интерфейса)" << std::endl;
 }
 
-// 3. Извлечение nnc (nonce) из MsgPack (Аналог Python/JS)
 
-/*
-void WSclient::handleMessage(const msgpack::object& obj) {
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "[WSclient] Валидный пакет передан парсеру:" << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
-    MsgParser::printPretty(obj);
-    std::cout << "========================================\n" << std::endl;
-}*/
 
 // 5. Отправка и упаковка MsgPack (Аналог send_message из Python)
-void WSclient::sendMessage(const std::vector<uint8_t>& payload) {
+//void WSclient::sendMessage(const std::vector<uint8_t>& payload) {
+void WSclient::sendMessage(MsgParser::PuhegUpperMessage *pumsg) {
     // Вычисляем чистый размер MsgPack данных для сети
-    size_t size = payload.size() - LWS_PRE;
+    size_t size = pumsg->packedMsg.size() - LWS_PRE;
 
     // Формируем сообщение для очереди FIFO
     BufferedMessage msg;
-    msg.payload = payload;
+    msg.payload = pumsg->packedMsg;
 
     // Логика QoS 2: проверяем состояние линии и сокета
     if (this->wsi == nullptr || !this->sent_message.empty()) {
@@ -142,17 +135,15 @@ int WSclient::handleCallback(struct lws *wsi_param, enum lws_callback_reasons re
 
         MsgParser::PuhegUpperMessage pumsg;
         pumsg.what = "initclient";
-        pumsg.thread = std::rand() % 10000000;
-
-        // === СТРОКИ С ТАЙМЕРАМИ УДАЛЕНЫ, ТАК КАК ОНИ БОЛЬШЕ НЕ НУЖНЫ ===
 
         // === АВТОМАТИЧЕСКАЯ ОТПРАВКА КОМАНДЫ ИНИЦИАЛИЗАЦИИ ===
         std::cout << "[System] Отправка пакета инициализации клиента..." << std::endl;
 
-        std::vector<uint8_t> empty_msg;
-        std::vector<uint8_t> init_packet = MsgParser::packMessage(&pumsg);
+        //std::vector<uint8_t> empty_msg;
+        //std::vector<uint8_t> init_packet = MsgParser::packMessage(&pumsg);
+        parser.packMessage(&pumsg);
 
-        this->sendMessage(init_packet);
+        this->sendMessage(&pumsg);
         // ====================================================
         break;
     }
@@ -221,24 +212,4 @@ int WSclient::handleCallback(struct lws *wsi_param, enum lws_callback_reasons re
     return 0;
 }
 
-/*
-void WSclient::sendFlatCommand(const std::string& flat_line) {
-    // Разбираем строку и пакуем в MsgPack с префиксом LWS_PRE за один шаг
-    std::vector<uint8_t> payload = MsgParser::parseFlatCommand(flat_line);
-    size_t size = payload.size() - LWS_PRE;
 
-    BufferedMessage b_msg;
-    b_msg.payload = payload;
-
-    // Стандартная логика отправки / QoS 2 буферизации, которая у нас уже отлажена
-    if (this->wsi == nullptr || !this->sent_message.empty()) {
-        std::cout << "[QoS2] Линия занята. Плоская команда помещена в буфер FIFO." << std::endl;
-        this->message_buffer.push(b_msg);
-    } else {
-        lws_write(this->wsi, &b_msg.payload[LWS_PRE], size, LWS_WRITE_BINARY);
-        std::cout << "[QoS2] Плоская команда упакована в MsgPack и отправлена в сеть." << std::endl;
-        this->sent_message = b_msg.payload;
-        this->resend_trys = 0;
-    }
-}
-*/

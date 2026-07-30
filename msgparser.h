@@ -22,36 +22,38 @@ public:
 
     struct PuhegUpperMessage{
 
+        uint32_t id;
         std::string what;
         std::string todo;
         int32_t howmuch = -1;
         std::vector<uint8_t> msg;
+        std::vector<uint8_t> packedMsg;
         uint32_t thread = 0;
+
+        MSGPACK_DEFINE_MAP(id, what, todo, howmuch, msg, thread);
 
     };
 
-    // Принимает плоскую строку и возвращает упакованный MsgPack-вектор с LWS_PRE оверхедом
-    static std::vector<uint8_t> parseFlatCommand(const std::string& flat_line);
+    struct RunningProcess{
+        uint32_t thread;
+        std::string state;
+        bool running = false;
+    };
 
-    // Красивый вывод MsgPack объекта на экран
-    static void printPretty(const msgpack::object& obj, int indent = 0);
+    // Принимает плоскую строку и возвращает упакованный MsgPack-вектор с LWS_PRE оверхедом
+    //static std::vector<uint8_t> parseFlatCommand(const std::string& flat_line);
+    void parseFlatCommand(const std::string& flat_line, PuhegUpperMessage*);
 
     // Извлечение nnc (nonce) из входящего бинарного буфера
     static int64_t extractNnc(const uint8_t *data, size_t size);
 
-    // Упаковка исходящего сообщения на чистом C++ (динамический подсчет полей)
-    // Изменено: howmuch теперь int32_t (для поддержки -1), msg принимает вектор байт
-    /*
-    static std::vector<uint8_t> packMessage(const std::string& what,
-                                            const std::string& todo,
-                                            int32_t howmuch,
-                                            const std::vector<uint8_t>& msg);
-    */
-
-    static std::vector<uint8_t> packMessage(PuhegUpperMessage*);
+    void packMessage(PuhegUpperMessage*);
 
     // Метод диспетчеризации входящих системных MsgPack-объектов
     static void dispatchIncomingPacket(const msgpack::object& obj);
 };
+
+extern MsgParser parser;
+extern MsgParser::RunningProcess runningProc;
 
 #endif // MSGPARSER_H

@@ -5,17 +5,7 @@
 #include <map>
 #include <string>
 
-// Структура строго повторяет поля словаря cmd из Python консоли + ID
-struct SystemPacket {
-    std::string what;
-    std::string todo;
-    int32_t howmuch;            // Поддерживает знаковые числа, включая -1
-    msgpack::type::raw_ref msg; // Сырые байты данных
-    uint32_t id;
-    uint32_t thread;
-
-    MSGPACK_DEFINE_MAP(what, todo, howmuch, msg, id, thread);
-};
+//MsgParser::RunningProcess runningProcess;
 
 void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     // Если пришел не словарь (Map), выходим — это некорректный системный пакет
@@ -131,38 +121,6 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
 
 
-void MsgParser::printPretty(const msgpack::object& obj, int indent) {
-    std::string spaces(indent, ' ');
-    switch (obj.type) {
-    case msgpack::type::NIL:              std::cout << "null"; break;
-    case msgpack::type::BOOLEAN:          std::cout << (obj.via.boolean ? "true" : "false"); break;
-    case msgpack::type::POSITIVE_INTEGER: std::cout << obj.via.u64; break;
-    case msgpack::type::NEGATIVE_INTEGER: std::cout << obj.via.i64; break;
-    case msgpack::type::FLOAT32:
-    case msgpack::type::FLOAT64:          std::cout << obj.via.f64; break;
-    case msgpack::type::STR:              std::cout << "\"" << obj.as<std::string>() << "\""; break;
-    case msgpack::type::BIN:              std::cout << "<binary data, size: " << obj.via.bin.size << " bytes>"; break;
-    case msgpack::type::ARRAY:
-        std::cout << "[\n";
-        for (uint32_t i = 0; i < obj.via.array.size; ++i) {
-            std::cout << spaces << "  "; printPretty(obj.via.array.ptr[i], indent + 2);
-            if (i + 1 < obj.via.array.size) std::cout << ","; std::cout << "\n";
-        }
-        std::cout << spaces << "]"; break;
-    case msgpack::type::MAP:
-        std::cout << "{\n";
-        for (uint32_t i = 0; i < obj.via.map.size; ++i) {
-            auto& kv = obj.via.map.ptr[i];
-            std::cout << spaces << "  "; printPretty(kv.key, indent + 2); std::cout << ": ";
-            printPretty(kv.val, indent + 2);
-            if (i + 1 < obj.via.map.size) std::cout << ","; std::cout << "\n";
-        }
-        std::cout << spaces << "}"; break;
-    default: std::cout << "<unknown type>"; break;
-    }
-    if (indent == 0) std::cout << std::endl;
-}
-
 int64_t MsgParser::extractNnc(const uint8_t *data, size_t size) {
     int64_t nnc = -1;
     try {
@@ -183,60 +141,35 @@ int64_t MsgParser::extractNnc(const uint8_t *data, size_t size) {
     return nnc;
 }
 
-/*
-std::vector<uint8_t> MsgParser::packMessage(const std::string& what,
-                                            const std::string& todo,
-                                            int32_t howmuch,
-                                            const std::vector<uint8_t>& msg)
-{
-    SystemPacket packet;
-    packet.what = what;
-    packet.todo = todo;
-    packet.howmuch = howmuch;
-    packet.msg = msgpack::type::raw_ref((const char*)msg.data(), msg.size());
-    packet.id = std::rand() % 10000000;
 
-    std::stringstream buffer;
-    msgpack::pack(buffer, packet);
-    std::string str_data = buffer.str();
 
-    std::vector<uint8_t> result(LWS_PRE + str_data.size());
-    std::memcpy(&result[LWS_PRE], str_data.data(), str_data.size());
-    return result;
-}
-*/
+void MsgParser::packMessage(PuhegUpperMessage *pumsg) {
 
-std::vector<uint8_t> MsgParser::packMessage(PuhegUpperMessage *pumsg)
-{
-    SystemPacket packet;
-    packet.what = pumsg->what;
-    packet.todo = pumsg->todo;
-    packet.howmuch = pumsg->howmuch;
-    packet.msg = msgpack::type::raw_ref((const char*)pumsg->msg.data(), pumsg->msg.size());
-    packet.id = std::rand() % 10000000;
-    packet.thread = pumsg->thread;
+    pumsg->id = std::rand() % 10000000;
+    pumsg->thread = std::rand() % 10000000;
 
-    std::stringstream buffer;
-    msgpack::pack(buffer, packet);
-    std::string str_data = buffer.str();
+    // 2. Сериализуем структуру напрямую в msgpack-буфер
+    msgpack::sbuffer sbuf;
+    msgpack::pack(sbuf, *pumsg);
 
-    std::vector<uint8_t> result(LWS_PRE + str_data.size());
-    std::memcpy(&result[LWS_PRE], str_data.data(), str_data.size());
+    // 3. Выделяем память в целевом векторе: отступ LWS_PRE + размер полезных данных msgpack
+    pumsg->packedMsg.resize(LWS_PRE + sbuf.size());
 
-    // ВЫВОД СФОРМИРОВАННОГО JSON НА ЭКРАН
-    msgpack::object_handle oh = msgpack::unpack(str_data.data(), str_data.size());
+    // 4. Копируем данные со смещением LWS_PRE
+    // sbuf.data() и sbuf.size() дают прямой доступ к упакованным байтам
+    std::memcpy(pumsg->packedMsg.data() + LWS_PRE, sbuf.data(), sbuf.size());
+
+    // 5. ВЫВОД СФОРМИРОВАННОГО JSON НА ЭКРАН (для отладки)
+    // Распаковываем только что созданный буфер, чтобы красиво вывести его в консоль
+    msgpack::object_handle oh = msgpack::unpack(sbuf.data(), sbuf.size());
     std::cout << "[MsgParser] Исходящее сообщение: " << oh.get() << std::endl;
-
-    return result;
 }
 
-std::vector<uint8_t> MsgParser::parseFlatCommand(const std::string& flat_line) {
-    std::string what = "";
-    std::string todo = "";
-    int32_t howmuch = -1;
+void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage *pumsg) {
+
     std::vector<uint8_t> msg_bytes;
 
-    MsgParser::PuhegUpperMessage pumsg;
+    //MsgParser::PuhegUpperMessage pumsg;
 
     try {
         // Ищем позиции трех точек-разделителей
@@ -247,38 +180,33 @@ std::vector<uint8_t> MsgParser::parseFlatCommand(const std::string& flat_line) {
         // Если формат нарушен (нет хотя бы 3 точек), пакуем всю строку как ошибку в поле what
         if (p1 == std::string::npos || p2 == std::string::npos || p3 == std::string::npos) {
             std::cerr << "[Parser Error] Неверный формат! Ожидалось: what.todo.howmuch. msg" << std::endl;
-            //return packMessage("error", "invalid_format", -1, std::vector<uint8_t>(flat_line.begin(), flat_line.end()));
-            pumsg.what = "error";
-            pumsg.todo = "invalid_format";
-            pumsg.msg = std::vector<uint8_t>(flat_line.begin(), flat_line.end());
 
         } else {
 
             // Вырезаем строки между точками
-            pumsg.what = flat_line.substr(0, p1);
-            pumsg.todo = flat_line.substr(p1 + 1, p2 - p1 - 1);
+            pumsg->what = flat_line.substr(0, p1);
+            pumsg->todo = flat_line.substr(p1 + 1, p2 - p1 - 1);
 
             std::string howmuch_str = flat_line.substr(p2 + 1, p3 - p2 - 1);
             if (!howmuch_str.empty()) {
-                pumsg.howmuch = std::stoi(howmuch_str);
+                pumsg->howmuch = std::stoi(howmuch_str);
             }
 
             // После третьей точки идет пробел и само сообщение: ". hello" -> берем всё после ". "
             if (p3 + 2 < flat_line.size()) {
                 std::string msg_str = flat_line.substr(p3 + 2); // Пропускаем точку и пробел
                 msg_bytes.assign(msg_str.begin(), msg_str.end());
-                pumsg.msg = msg_bytes;
+                pumsg->msg = msg_bytes;
             }
         }
     }
     catch (const std::exception& e) {
         std::cerr << "[Parser Error] Исключение при разборе: " << e.what() << std::endl;
-        //return packMessage("error", "parser_exception", -1, {});
-        pumsg.what = "error";
-        pumsg.todo = "parser_exception";
+
     }
 
-    // Возвращаем упакованный по правилам C++ MsgPack-пакет (с префиксом LWS_PRE)
-    return packMessage(&pumsg);
+
+    parser.packMessage(pumsg);
+    //return pumsg.packedMsg;
 }
 

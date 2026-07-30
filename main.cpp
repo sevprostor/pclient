@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 WSclient wsclient;
+MsgParser parser;
 
 static struct lws_protocols protocols[] = {
     { "qos2-protocol", WSclient::callbackQos2Client, 0, 0, 0, nullptr, 0 },
@@ -16,6 +17,7 @@ static struct lws_protocols protocols[] = {
 // Исправленный поток интерактивного ввода
 void consoleInputThread(WSclient* client) {
     std::string line;
+    MsgParser::PuhegUpperMessage pumsg;
 
     // Даем сетевому слою 100 мс на вывод стартовых логов, чтобы интерфейс консоли не перемешивался
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -32,8 +34,9 @@ void consoleInputThread(WSclient* client) {
                 break;
             }
             if (!line.empty()) {
-                std::vector<uint8_t> packed_bytes = MsgParser::parseFlatCommand(line);
-                client->sendMessage(packed_bytes);
+                //std::vector<uint8_t> packed_bytes = MsgParser::parseFlatCommand(line);
+                parser.parseFlatCommand(line, &pumsg);
+                client->sendMessage(&pumsg);
             }
             std::cout << "> " << std::flush; // Возвращаем каретку после отправки команды
         }

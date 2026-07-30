@@ -27,6 +27,7 @@ extern "C" {
 // Структура для сообщения, хранящегося в очереди
 struct BufferedMessage {
     std::vector<uint8_t> payload; // Вектор байт, выделяемый автоматически
+    //std::vector<MsgParser::PuhegUpperMessage> outgoing;
 };
 
 class WSclient {
@@ -38,13 +39,9 @@ public:
     // Прототипы функций управления клиентом
     void initContext();
     void sendSuccess(struct lws *wsi);
-    //int64_t extractNnc(const uint8_t *data, size_t size);
-    //void handleMessage(const msgpack_object& obj);
 
-    //void handleMessage(const msgpack::object& obj); // Заменили msgpack_object на msgpack::object
-
-    //void sendMessage(const char *what, const char *todo, int howmuch);
-    void sendMessage(const std::vector<uint8_t>& payload);
+    //void sendMessage(const std::vector<uint8_t>& payload);
+    void sendMessage(MsgParser::PuhegUpperMessage*);
 
     void processTimers();
 
