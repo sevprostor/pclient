@@ -6,39 +6,56 @@
 #include <string>
 #include <chrono>
 #include <iomanip>
+#include <sstream> // Для std::ostringstream
 
 class Log {
 public:
-    // Информационное сообщение (вывод в std::cout)
-    static void info(const std::string& tag, const std::string& msg) {
-        print("INFO", tag, msg, false);
+    // Шаблон для INFO: принимает тег и любое количество аргументов
+    template<typename... Args>
+    static void info(const std::string& tag, Args&&... args) {
+        print("INFO", tag, std::forward<Args>(args)...);
     }
 
-    // Сообщение об ошибке (вывод в std::cerr)
-    static void error(const std::string& tag, const std::string& msg) {
-        print("ERR", tag, msg, true);
+    // Шаблон для ERROR: принимает тег и любое количество аргументов
+    template<typename... Args>
+    static void error(const std::string& tag, Args&&... args) {
+        print("ERR", tag, std::forward<Args>(args)...);
     }
 
 private:
-    static void print(const std::string& level, const std::string& tag, const std::string& msg, bool isError) {
-        // Получаем текущее время
+    // Базовый случай рекурсии (когда аргументы закончились)
+    static void buildMessage(std::ostringstream&) {}
+
+    // Рекурсивный случай: берем первый аргумент, пишем в поток, передаем остальные
+    template<typename T, typename... Args>
+    static void buildMessage(std::ostringstream& ss, T&& first, Args&&... rest) {
+        ss << std::forward<T>(first);
+        buildMessage(ss, std::forward<Args>(rest)...);
+    }
+
+    // Основная функция печати
+    template<typename... Args>
+    static void print(const std::string& level, const std::string& tag, Args&&... args) {
+        // 1. Получаем время
         auto now = std::chrono::system_clock::now();
         auto time_t_now = std::chrono::system_clock::to_time_t(now);
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
-        // Преобразуем в локальное время (потокобезопасная версия для Linux/POSIX)
         std::tm tm_buf;
         localtime_r(&time_t_now, &tm_buf);
 
-        // Выбираем поток вывода
-        std::ostream& out = isError ? std::cerr : std::cout;
+        // 2. Склеиваем все переданные аргументы внутри ostringstream
+        std::ostringstream ss;
+        buildMessage(ss, std::forward<Args>(args)...);
 
-        // Форматируем и выводим: [ЧЧ:ММ:СС.мс] [УРОВЕНЬ] [ТЕГ] Сообщение
+        // 3. Выводим
+        std::ostream& out = (level == "ERR") ? std::cerr : std::cout;
+
         out << "[" << std::put_time(&tm_buf, "%H:%M:%S") << "."
             << std::setfill('0') << std::setw(3) << ms.count() << "] "
             << "[" << level << "] "
             << "[" << tag << "] "
-            << msg << std::endl;
+            << ss.str() << std::endl;
     }
 };
 

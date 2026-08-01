@@ -1,5 +1,6 @@
 #include "msgparser.h"
 #include "addressbook.h" // Обязательный инклуд для работы с адресной книгой
+#include "log.h"
 #include <sstream>
 #include <cstdlib>
 #include <map>
@@ -17,11 +18,12 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
     //ВЫВОД СЫРОГО JSON НАПРЯМУЮ
     //Без всяких условий
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "[MsgParser] Входящее сообщение:" << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
-    std::cout << obj << std::endl; // Выводит дерево элементов одной строкой кода
-    std::cout << "========================================\n" << std::endl;
+    //std::cout << "\n========================================" << std::endl;
+    //std::cout << "[MsgParser] Входящее сообщение:" << std::endl;
+    //std::cout << "----------------------------------------" << std::endl;
+    //std::cout << obj << std::endl; // Выводит дерево элементов одной строкой кода
+    //std::cout << "========================================\n" << std::endl;
+    Log::info("Msgparser", "[IN <<<]", obj);
 
     // =========================================================================
     // БЛОК 1: ADDRESSBOOK (Аналог Python: if isinstance(adressbook, dict))
@@ -110,7 +112,8 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
         std::string state = proc_map.count("state") ? proc_map["state"].as<std::string>() : "";
         std::string thread = proc_map.count("thread") ? proc_map["thread"].as<std::string>() : "";
 
-        std::cout << "[MsgParser] Обработка шага процесса '" << thread << "' -> Статус: " << state << std::endl;
+        //std::cout << "[MsgParser] Обработка шага процесса '" << thread << "' -> Статус: " << state << std::endl;
+
 
         watchProcess(state, thread);
     }
@@ -139,7 +142,15 @@ int64_t MsgParser::extractNnc(const uint8_t *data, size_t size) {
     return nnc;
 }
 
+// Кодировка обычного текста
+std::vector<int> MsgParser::encodeMsg(const std::string& text) {
+    return std::vector<int>(text.begin(), text.end());
+}
 
+// Кодировка сырых байт (на будущее, для IP-пакетов)
+std::vector<int> MsgParser::encodeMsg(const std::vector<uint8_t>& rawBytes) {
+    return std::vector<int>(rawBytes.begin(), rawBytes.end());
+}
 
 void MsgParser::packMessage(PuhegUpperMessage *pumsg) {
 
@@ -160,7 +171,8 @@ void MsgParser::packMessage(PuhegUpperMessage *pumsg) {
     // 5. ВЫВОД СФОРМИРОВАННОГО JSON НА ЭКРАН (для отладки)
     // Распаковываем только что созданный буфер, чтобы красиво вывести его в консоль
     msgpack::object_handle oh = msgpack::unpack(sbuf.data(), sbuf.size());
-    std::cout << "[MsgParser] Исходящее сообщение: " << oh.get() << std::endl;
+    //std::cout << "[MsgParser] Исходящее сообщение: " << oh.get() << std::endl;
+    Log::info("Msgparser", "[OUT >>>]", oh.get());
 }
 
 void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage *pumsg) {
@@ -177,7 +189,8 @@ void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage
 
         // Если формат нарушен (нет хотя бы 3 точек), пакуем всю строку как ошибку в поле what
         if (p1 == std::string::npos || p2 == std::string::npos || p3 == std::string::npos) {
-            std::cerr << "[Parser Error] Неверный формат! Ожидалось: what.todo.howmuch. msg" << std::endl;
+            //std::cerr << "[Parser Error] Неверный формат! Ожидалось: what.todo.howmuch. msg" << std::endl;
+            Log::error("Msgparser", "Неверный формат! Ожидалось: what.todo.howmuch. msg");
 
         } else {
 
@@ -194,12 +207,13 @@ void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage
             if (p3 + 2 < flat_line.size()) {
                 std::string msg_str = flat_line.substr(p3 + 2); // Пропускаем точку и пробел
                 msg_bytes.assign(msg_str.begin(), msg_str.end());
-                pumsg->msg = msg_bytes;
+                pumsg->msg = encodeMsg(msg_str);
             }
         }
     }
     catch (const std::exception& e) {
-        std::cerr << "[Parser Error] Исключение при разборе: " << e.what() << std::endl;
+        //std::cerr << "[Parser Error] Исключение при разборе: " << e.what() << std::endl;
+        Log::error("Msgparser", "parse error");
 
     }
 
@@ -219,7 +233,8 @@ bool MsgParser::isDeviceBusy() {
 void MsgParser::startProcess(uint32_t threadId) {
     runningProc.thread = threadId;
     runningProc.running = true;
-    std::cout << "[Process] Новый процесс " << runningProc.thread << " зарегистрирован как активный." << std::endl;
+    //std::cout << "[Process] Новый процесс " << runningProc.thread << " зарегистрирован как активный." << std::endl;
+    Log::info("Msgparser", "Process started: ", runningProc.thread);
 }
 
 void MsgParser::watchProcess(const std::string& state, const std::string& thread) {
@@ -230,16 +245,24 @@ void MsgParser::watchProcess(const std::string& state, const std::string& thread
     // Преобразуем числовой ID в строку для безопасного сравнения
     std::string trackedThreadStr = std::to_string(runningProc.thread);
 
+
+
     if (trackedThreadStr == thread) {
-        if (state == "WORK") {
-            std::cout << "[Process] Процесс '" << thread << "' выполняется (WORK)..." << std::endl;
-        }
-        else if (state == "OK") {
-            std::cout << "[Process] >>> Процесс '" << thread << "' успешно завершен (OK)! <<<" << std::endl;
+
+        Log::info("Msgparser", "Process ", runningProc.thread, ": ", state);
+
+        //if (state == "WORK") {
+            //std::cout << "[Process] Процесс '" << thread << "' выполняется (WORK)..." << std::endl;
+
+        //}
+        if (state == "OK") {
+            //std::cout << "[Process] >>> Процесс '" << thread << "' успешно завершен (OK)! <<<" << std::endl;
+            Log::info("Msgparser", "Процесс успешно завершен");
             runningProc.running = false; // Освобождаем устройство
         }
         else if (state == "FAIL") {
-            std::cerr << "[Process] !!! Процесс '" << thread << "' завершился с ошибкой (FAIL)! <<<" << std::endl;
+            //std::cerr << "[Process] !!! Процесс '" << thread << "' завершился с ошибкой (FAIL)! <<<" << std::endl;
+            Log::info("Msgparser", "Процесс провален");
             runningProc.running = false; // Освобождаем устройство даже при ошибке, чтобы избежать deadlock
         }
     }

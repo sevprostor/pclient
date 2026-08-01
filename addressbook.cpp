@@ -1,17 +1,22 @@
 #include "addressbook.h"
+#include "log.h"
 
 void Addressbook::setMyProfile(uint16_t id, const Contact& profile) {
     std::unique_lock lock(ab_mutex);
     my_id = id;
     my_profile = profile;
-    std::cout << "[Addressbook] Успешно сохранен собственный профиль. Мой ID: "
-              << my_id << ", Публичный ключ: " << my_profile.key << std::endl;
+    //std::cout << "[Addressbook] Успешно сохранен собственный профиль. Мой ID: "
+    //          << my_id << ", Публичный ключ: " << my_profile.key << std::endl;
+
+    Log::info("Addressbook", "MAC-адрес интерфейса: ", my_id, ", pubkey: ", my_profile.key);
 }
 
 void Addressbook::setContact(uint16_t id, const Contact& contact) {
     std::unique_lock lock(ab_mutex);
     contacts[id] = contact;
-    std::cout << "[Addressbook] Обновлен контакт [" << id << "] (Канал: " << contact.chanComm << ", Скорость: " << contact.netsp << ")" << std::endl;
+    //std::cout << "[Addressbook] Обновлен контакт [" << id << "] (Канал: " << contact.chanComm << ", Скорость: " << contact.netsp << ")" << std::endl;
+    Log::info("Addressbook", "Обновлен контакт MAC ", id, ", chanComm ", contact.chanComm, ", netsp ", contact.netsp);
+
 }
 
 void Addressbook::setContacts(const std::map<uint16_t, Contact>& new_contacts) {
@@ -19,14 +24,16 @@ void Addressbook::setContacts(const std::map<uint16_t, Contact>& new_contacts) {
     for (const auto& [id, contact] : new_contacts) {
         contacts[id] = contact;
     }
-    std::cout << "[Addressbook] Пакетно загружено контактов из системы: " << new_contacts.size() << std::endl;
+    //std::cout << "[Addressbook] Пакетно загружено контактов из системы: " << new_contacts.size() << std::endl;
+    Log::info("Addressbook", "Из интерфейса загружено ", new_contacts.size(), " контактов");
 }
 
 void Addressbook::clear() {
     std::unique_lock lock(ab_mutex);
     contacts.clear();
     my_id = 0;
-    std::cout << "[Addressbook] Адресная книга полностью очищена." << std::endl;
+    //std::cout << "[Addressbook] Адресная книга полностью очищена." << std::endl;
+    Log::info("Addressbook", "Адресная книга очищена");
 }
 
 uint16_t Addressbook::getMyId() const {

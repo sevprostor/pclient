@@ -167,7 +167,7 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
         // 2. Если это не 'S', значит пришли полезные данные (MsgPack)
         else {
             //std::cout << "[QoS2] Получены новые данные от интерфейса." << std::endl;
-            Log::info("Wsclient", "Новое сообщение Puheg");
+            //Log::info("Wsclient", "Новое сообщение Puheg");
 
             // ШАГ А: Мы ОБЯЗАНЫ отправить устройству байт 'S' (QoS2 ACK)
             wsclient.sendSuccess(wsi);

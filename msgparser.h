@@ -26,7 +26,7 @@ public:
         std::string what;
         std::string todo;
         int32_t howmuch = -1;
-        std::vector<uint8_t> msg;
+        std::vector<int> msg; //Это должно отправляться как массив байт JSON
         std::vector<uint8_t> packedMsg;
         uint32_t thread = 0;
 
@@ -39,6 +39,10 @@ public:
         std::string state;
         bool running = false;
     };
+
+    //Кодировка msg в JsonArray
+    std::vector<int> encodeMsg(const std::string& text);
+    std::vector<int> encodeMsg(const std::vector<uint8_t>& rawBytes);
 
     // Принимает плоскую строку и возвращает упакованный MsgPack-вектор с LWS_PRE оверхедом
     //static std::vector<uint8_t> parseFlatCommand(const std::string& flat_line);
