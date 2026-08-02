@@ -20,7 +20,10 @@ add_executable(pclient main.cpp wsclient.h
     addressbook.cpp
     readme.md
     puheg.png
-    log.h)
+    log.h
+    log.cpp
+    console.h
+    console.cpp)
 
 # Указываем папки с заголовочными файлами (.h)
 # Для msgpack теперь используем современную переменную msgpack_INCLUDE_DIRS или её Си-аналог

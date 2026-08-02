@@ -40,7 +40,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
             std::map<std::string, msgpack::object> rec_map;
             rec_it->second.convert(rec_map);
 
-            Contact c;
+            Addressbook::Contact c;
             if (rec_map.count("id")) c.id = static_cast<uint16_t>(rec_map["id"].as<uint64_t>());
 
             // Безопасное приведение к uint8_t
@@ -66,7 +66,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
             contacts_it->second.convert(contacts_map);
 
             // Временный C++ словарь для пакетной загрузки контактов (ключ — uint16_t)
-            std::map<uint16_t, Contact> parsed_batch;
+            std::map<uint16_t, Addressbook::Contact> parsed_batch;
 
             for (const auto& [key, contact_obj] : contacts_map) {
                 if (contact_obj.type != msgpack::type::MAP) continue;
@@ -74,7 +74,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
                 std::map<std::string, msgpack::object> c_map;
                 contact_obj.convert(c_map);
 
-                Contact c;
+                Addressbook::Contact c;
                 // Если внутри структуры есть числовой "id" — берем его, иначе парсим строковый ключ ("221" -> 221)
                 if (c_map.count("id")) {
                     c.id = static_cast<uint16_t>(c_map["id"].as<uint64_t>());
@@ -116,7 +116,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
         //std::cout << "[MsgParser] Обработка шага процесса '" << thread << "' -> Статус: " << state << std::endl;
 
         if(runningProc.justLaunched){
-            Log::info("Process", "Новый процесс ", threadId, " зарегистрирован как активный.");
+            Log::info("Process", "Новый процесс ", thread, " зарегистрирован как активный.");
         }
 
         runningProc.justLaunched = false;
