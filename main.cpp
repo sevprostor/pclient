@@ -5,42 +5,62 @@
 #include <chrono>
 #include <cstring>
 #include <cstdlib>
+#include <mutex>
 
 WSclient wsclient;
 MsgParser parser;
-MsgParser::RunningProcess runningProc;
+
+// Глобальный мьютекс для защиты консоли от гонок потоков
+std::mutex consoleMutex;
 
 static struct lws_protocols protocols[] = {
     { "qos2-protocol", WSclient::callbackQos2Client, 0, 0, 0, nullptr, 0 },
     { nullptr, nullptr, 0, 0, 0, nullptr, 0 }
 };
 
-// Исправленный поток интерактивного ввода
+// Поток интерактивного ввода
 void consoleInputThread(WSclient* client) {
-    std::string line;
-    MsgParser::PuhegUpperMessage pumsg;
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-    // Даем сетевому слою 100 мс на вывод стартовых логов, чтобы интерфейс консоли не перемешивался
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    std::cout << "\n[Console] Интерактивный режим готов. Формат: what.todo.howmuch. msg" << std::endl;
-    std::cout << "[Console] Пример: toss..1234. hello" << std::endl;
-    std::cout << "[Console] Для выхода введите 'exit'\n" << std::endl;
-    std::cout << "> " << std::flush; // Рисуем каретку ввода и принудительно сбрасываем буфер
+    {
+        std::lock_guard<std::mutex> lock(consoleMutex);
+        std::cout << "\n[Console] Интерактивный режим готов. Формат: what.todo.howmuch. msg" << std::endl;
+        std::cout << "[Console] Пример: toss..1234. hello" << std::endl;
+        std::cout << "[Console] Для выхода введите 'exit'\n" << std::endl;
+        std::cout << "> " << std::flush;
+    }
 
     while (client->running) {
-        if (std::getline(std::cin, line)) {
-            if (line == "exit" || line == "quit") {
-                client->running = 0;
-                break;
-            }
-            if (!line.empty()) {
-                //std::vector<uint8_t> packed_bytes = MsgParser::parseFlatCommand(line);
-                parser.parseFlatCommand(line, &pumsg);
-                client->sendMessage(&pumsg);
-            }
-            std::cout << "> " << std::flush; // Возвращаем каретку после отправки команды
+        std::string line;
+
+        {
+            std::lock_guard<std::mutex> lock(consoleMutex);
+            std::getline(std::cin, line);
         }
+
+        if (line == "exit" || line == "quit") {
+            client->running = 0;
+            break;
+        }
+
+        if (!line.empty()) {
+            MsgParser::PuhegUpperMessage pumsg; // Чистый экземпляр для каждой команды
+            parser.parseFlatCommand(line, &pumsg);
+            client->sendMessage(&pumsg);
+
+            std::lock_guard<std::mutex> lock(consoleMutex);
+            std::cout << "> " << std::flush;
+        }
+    }
+}
+
+// НОВЫЙ ПОТОК: Независимый обработчик таймеров
+void timerThread(WSclient* client) {
+    while (client->running) {
+        // Спим ровно 500 мс. Это гарантирует, что таймеры будут проверяться
+        // с точностью до миллисекунды, независимо от блокировок lws_service.
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        client->processTimers();
     }
 }
 
@@ -73,23 +93,26 @@ int main(int argc, char **argv) {
     lws_client_connect_via_info(&i);
     std::cout << "[System] TCP/IP Клиент запущен. Вход в сетевой цикл..." << std::endl;
 
-    // Запускаем поток интерактивного ввода
+    // Запускаем потоки
     std::thread input_thread(consoleInputThread, &wsclient);
+    std::thread timers_thread(timerThread, &wsclient); // <-- Запуск независимого потока таймеров
 
-    // ИСПРАВЛЕННЫЙ ГЛАВНЫЙ СЕТЕВОЙ ЦИКЛ
+    // ГЛАВНЫЙ ЦИКЛ: Теперь он отвечает ТОЛЬКО за сетевые события libwebsockets
     while (wsclient.running) {
-        lws_service(lws_ctx, 0);
-        wsclient.processTimers();
-
-        // Увеличиваем задержку до 10 мс.
-        // Это дает ОС достаточно времени, чтобы переключить контекст процессора на поток ввода std::getline
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Можно оставить 50 или 0. Поскольку таймеры вынесены в отдельный поток,
+        // блокировка lws_service больше не влияет на логику приложения.
+        lws_service(lws_ctx, 50);
     }
 
+    // Корректное завершение
     if (input_thread.joinable()) {
-        // Если поток ввода завис на std::getline, выводим подсказку для закрытия терминала
         std::cout << "[System] Нажмите Enter для завершения работы..." << std::endl;
         input_thread.join();
+    }
+
+    // Останавливаем поток таймеров (он выйдет из цикла, так как running = 0)
+    if (timers_thread.joinable()) {
+        timers_thread.join();
     }
 
     lws_context_destroy(lws_ctx);

@@ -21,6 +21,7 @@ public:
     MsgParser::PuhegUpperMessage sentMessage;
 
     // Таймеры
+    std::chrono::steady_clock::time_point lastTimeoutCheck;
     std::chrono::steady_clock::time_point lastBufferCheck;
     std::chrono::steady_clock::time_point lastResendCheck;
 
@@ -30,6 +31,7 @@ public:
     void sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend = false);
     void processTimers();
     void successReceived();
+    static int64_t extractNnc(const msgpack::object& obj);
 
     // Статический callback для libwebsockets
     static int callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reason,

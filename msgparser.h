@@ -38,6 +38,9 @@ public:
         uint32_t thread;
         std::string state;
         bool running = false;
+        std::chrono::steady_clock::time_point startTime; // <-- ДОБАВЛЕНО
+        std::chrono::steady_clock::time_point lastResponseTime; // <-- ДОБАВЛЕНО
+        bool justLaunched = true;
     };
 
     //Кодировка msg в JsonArray
@@ -49,7 +52,7 @@ public:
     void parseFlatCommand(const std::string& flat_line, PuhegUpperMessage*);
 
     // Извлечение nnc (nonce) из входящего бинарного буфера
-    static int64_t extractNnc(const uint8_t *data, size_t size);
+    //static int64_t extractNnc(const uint8_t *data, size_t size);
 
     void packMessage(PuhegUpperMessage*);
 
@@ -60,6 +63,7 @@ public:
     static bool isDeviceBusy();
     static void startProcess(uint32_t threadId);
     static void watchProcess(const std::string& state, const std::string& thread);
+    static void checkProcessTimeout(); // <-- ДОБАВЛЕНО
 
 };
 

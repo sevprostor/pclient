@@ -21,6 +21,7 @@ void WSclient::initContext() {
 
     this->lastBufferCheck = std::chrono::steady_clock::now();
     this->lastResendCheck = std::chrono::steady_clock::now();
+    this->lastTimeoutCheck = std::chrono::steady_clock::now(); // <-- ДОБАВИТЬ ЭТО
 
     //std::cout << "[System] Внутренний контекст класса WSclient инициализирован." << std::endl;
 }
@@ -90,6 +91,8 @@ void WSclient::sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend) 
 // 5. Обработка таймеров
 void WSclient::processTimers() {
     auto currentTime = std::chrono::steady_clock::now();
+    //Log::info("Debug", "processTimers тик. isRunning: ", runningProc.running);
+
 
     // 5.1. Проверка буфера FIFO (раз в 500 мс)
     auto passedBufferMs = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - this->lastBufferCheck).count();
@@ -127,6 +130,40 @@ void WSclient::processTimers() {
             }
         }
     }
+
+    // 5.3. Проверка таймаутов процесса (раз в 1000 мс)
+    static std::chrono::steady_clock::time_point lastTimeoutCheck = std::chrono::steady_clock::now();
+    auto passedTimeoutMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               currentTime - lastTimeoutCheck).count();
+    if (passedTimeoutMs >= 500) {
+        lastTimeoutCheck = currentTime;
+        MsgParser::checkProcessTimeout();
+        //MsgParser::checkProcessTimeout(1000);  // Проверка первого ответа
+        //MsgParser::checkProcessTimeout(5000);  // Проверка завершения
+    }
+}
+
+// Извлечение nnc из msgpack::object для фильтрации дубликатов
+int64_t WSclient::extractNnc(const msgpack::object& obj) {
+    if (obj.type != msgpack::type::MAP) return -1;
+
+    std::map<std::string, msgpack::object> root_map;
+    obj.convert(root_map);
+
+    for (const auto& pair : root_map) {
+        // Ищем nnc внутри любого вложенного словаря (process, transport, hardware и т.д.)
+        if (pair.second.type == msgpack::type::MAP) {
+            std::map<std::string, msgpack::object> inner_map;
+            pair.second.convert(inner_map);
+
+            auto it = inner_map.find("nnc");
+            if (it != inner_map.end()) {
+                // .as<int64_t>() безопасно извлекает число
+                return it->second.as<int64_t>();
+            }
+        }
+    }
+    return -1;
 }
 
 // 6. Callback для libwebsockets
@@ -166,6 +203,16 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
         }
         // 2. Если это не 'S', значит пришли полезные данные (MsgPack)
         else {
+
+
+            // ВАЖНО: Если пришли данные, значит устройство получило нашу команду.
+            // Сбрасываем isLineBusy, даже если 'S' не пришёл отдельно.
+            if (wsclient.isLineBusy) {
+                wsclient.isLineBusy = false;
+                wsclient.sentMessage = MsgParser::PuhegUpperMessage();
+                wsclient.resendTries = 0;
+                Log::info("QoS2", "Получены данные от устройства. Линия свободна.");
+            }
             //std::cout << "[QoS2] Получены новые данные от интерфейса." << std::endl;
             //Log::info("Wsclient", "Новое сообщение Puheg");
 
@@ -176,6 +223,22 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
             try {
                 msgpack::object_handle oh = msgpack::unpack(reinterpret_cast<const char*>(in), len);
                 msgpack::object deserialized = oh.get();
+
+                // ============================================================
+                // ФИЛЬТРАЦИЯ ДУБЛИКАТОВ ПО NNC
+                // ============================================================
+                int64_t current_nnc = WSclient::extractNnc(deserialized);
+
+                if (current_nnc != -1) {
+                    if (current_nnc == wsclient.lastNnc) {
+                        // Это дубликат! Молча игнорируем и прерываем обработку.
+                        return 0;
+                    }
+                    // Это новое сообщение, запоминаем его nnc
+                    wsclient.lastNnc = current_nnc;
+                }
+                // ============================================================
+
 
                 // ШАГ В: Передаем готовый объект в твой СУЩЕСТВУЮЩИЙ метод
                 MsgParser::dispatchIncomingPacket(deserialized);

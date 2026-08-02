@@ -6,7 +6,7 @@
 #include <map>
 #include <string>
 
-//MsgParser::RunningProcess runningProcess;
+MsgParser::RunningProcess runningProc;
 
 void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     // Если пришел не словарь (Map), выходим — это некорректный системный пакет
@@ -104,6 +104,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     // =========================================================================
     // БЛОК 2: PROCESS (Аналог Python: if isinstance(proc, dict))
     // =========================================================================
+
     auto proc_it = root_map.find("process");
     if (proc_it != root_map.end() && proc_it->second.type == msgpack::type::MAP) {
         std::map<std::string, msgpack::object> proc_map;
@@ -114,14 +115,58 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
         //std::cout << "[MsgParser] Обработка шага процесса '" << thread << "' -> Статус: " << state << std::endl;
 
+        if(runningProc.justLaunched){
+            Log::info("Process", "Новый процесс ", threadId, " зарегистрирован как активный.");
+        }
+
+        runningProc.justLaunched = false;
 
         watchProcess(state, thread);
+
+    } else if(runningProc.running && runningProc.justLaunched){
+        //если в только запущенном процесс нету process - просто сбросить.
+
+        runningProc.running = false;
+        //Log::info("Msgparser", "Это не процесс, разблокировано");
+
     }
+
+    /*
+    for (const auto& [key, value] : root_map) {
+        // Нас интересуют только вложенные словари (MAP)
+        if (value.type == msgpack::type::MAP) {
+            std::map<std::string, msgpack::object> inner_map;
+            value.convert(inner_map);
+
+            std::string state = "";
+            std::string thread_or_parent = "";
+
+            // Вариант А: Это полноценный блок "process" (есть поле "thread")
+            if (inner_map.count("thread")) {
+                thread_or_parent = inner_map["thread"].as<std::string>();
+                if (inner_map.count("state")) {
+                    state = inner_map["state"].as<std::string>();
+                }
+            }
+            // Вариант Б: Это блок задачи типа "transport" (есть поле "parent")
+            else if (inner_map.count("parent")) {
+                thread_or_parent = inner_map["parent"].as<std::string>();
+                if (inner_map.count("state")) {
+                    state = inner_map["state"].as<std::string>();
+                }
+            }
+
+            // Если мы нашли и идентификатор, и состояние, передаем их в монитор
+            if (!state.empty() && !thread_or_parent.empty()) {
+                watchProcess(state, thread_or_parent);
+            }
+        }
+    }*/
 }
 
 
 
-
+/*
 int64_t MsgParser::extractNnc(const uint8_t *data, size_t size) {
     int64_t nnc = -1;
     try {
@@ -140,7 +185,7 @@ int64_t MsgParser::extractNnc(const uint8_t *data, size_t size) {
         }
     } catch (...) {}
     return nnc;
-}
+}*/
 
 // Кодировка обычного текста
 std::vector<int> MsgParser::encodeMsg(const std::string& text) {
@@ -233,10 +278,13 @@ bool MsgParser::isDeviceBusy() {
 void MsgParser::startProcess(uint32_t threadId) {
     runningProc.thread = threadId;
     runningProc.running = true;
-    //std::cout << "[Process] Новый процесс " << runningProc.thread << " зарегистрирован как активный." << std::endl;
-    Log::info("Msgparser", "Process started: ", runningProc.thread);
+    runningProc.justLaunched = true;
+    runningProc.startTime = std::chrono::steady_clock::now();
+    runningProc.lastResponseTime = std::chrono::steady_clock::time_point(); // Сброс в ноль
+    //Log::info("Process", "Новый процесс ", threadId, " зарегистрирован как активный.");
 }
 
+/*
 void MsgParser::watchProcess(const std::string& state, const std::string& thread) {
     if (!runningProc.running) {
         return; // Ничего не отслеживаем, выходим
@@ -266,5 +314,51 @@ void MsgParser::watchProcess(const std::string& state, const std::string& thread
             runningProc.running = false; // Освобождаем устройство даже при ошибке, чтобы избежать deadlock
         }
     }
+}*/
+
+void MsgParser::watchProcess(const std::string& state, const std::string& threadId) {
+    if (!runningProc.running) return;
+
+    std::string trackedThreadStr = std::to_string(runningProc.thread);
+
+    if (trackedThreadStr == threadId) {
+        if (state == "WORK") {
+
+            Log::info("Process", "Процесс '", threadId, "' выполняется (WORK)...");
+            runningProc.lastResponseTime = std::chrono::steady_clock::now(); // <-- ДОБАВЛЕНО
+        }
+        else if (state == "OK") {
+            Log::info("Process", ">>> Процесс '", threadId, "' успешно завершен (OK)! <<<");
+            runningProc.running = false;
+        }
+        else if (state == "FAIL") {
+            Log::error("Process", "!!! Процесс '", threadId, "' завершился с ошибкой (FAIL)! <<<");
+            runningProc.running = false;
+        }
+    }
 }
 
+void MsgParser::checkProcessTimeout() {
+    if (!runningProc.running) return;
+
+    auto currentTime = std::chrono::steady_clock::now();
+
+    // Если ответ (WORK) еще не приходил, проверяем таймаут первого ответа (1000 мс)
+    if (runningProc.lastResponseTime.time_since_epoch().count() == 0) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           currentTime - runningProc.startTime).count();
+        if (elapsed >= 1000) {
+            Log::error("Process", "Таймаут первого ответа (1000 мс) для процесса ", runningProc.thread);
+            runningProc.running = false;
+        }
+    }
+    // Если ответ (WORK) уже приходил, проверяем таймаут завершения (5000 мс)
+    else {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           currentTime - runningProc.lastResponseTime).count();
+        if (elapsed >= 8000) {
+            Log::error("Process", "Таймаут завершения (5000 мс) для процесса ", runningProc.thread);
+            runningProc.running = false;
+        }
+    }
+}
