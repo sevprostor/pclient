@@ -1,10 +1,14 @@
 #pragma once
+#include "console.h"
 #include <iostream>
 #include <string>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
 #include <mutex>
+
+
+
 
 // Объявляем внешние переменные для работы с консолью
 extern std::mutex consoleMutex;
@@ -15,13 +19,13 @@ public:
     // Шаблон для INFO: принимает тег и любое количество аргументов
     template<typename... Args>
     static void info(const std::string& tag, Args&&... args) {
-        print("INFO", tag, std::forward<Args>(args)...);
+        print(tag, std::forward<Args>(args)...);
     }
 
     // Шаблон для ERROR: принимает тег и любое количество аргументов
     template<typename... Args>
     static void error(const std::string& tag, Args&&... args) {
-        print("ERR", tag, std::forward<Args>(args)...);
+        print(tag, std::forward<Args>(args)...);
     }
 
 private:
@@ -68,6 +72,7 @@ private:
             << ss.str() << std::endl;
 
         // 3. Перерисовываем приглашение и текущий ввод пользователя
-        out << "> " << g_currentInput << std::flush;
+        //out << "> " << g_currentInput << std::flush;
+        Console::redrawPrompt();
     }
 };

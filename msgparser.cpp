@@ -6,6 +6,8 @@
 #include <map>
 #include <string>
 
+#include "logcolors.h"
+
 MsgParser::RunningProcess runningProc;
 
 void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
@@ -23,7 +25,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     //std::cout << "----------------------------------------" << std::endl;
     //std::cout << obj << std::endl; // Выводит дерево элементов одной строкой кода
     //std::cout << "========================================\n" << std::endl;
-    Log::info("Msgparser", "[IN <<<]", obj);
+    Log::info("Msgparser", TAG_IN, obj);
 
     // =========================================================================
     // БЛОК 1: ADDRESSBOOK (Аналог Python: if isinstance(adressbook, dict))
@@ -217,7 +219,7 @@ void MsgParser::packMessage(PuhegUpperMessage *pumsg) {
     // Распаковываем только что созданный буфер, чтобы красиво вывести его в консоль
     msgpack::object_handle oh = msgpack::unpack(sbuf.data(), sbuf.size());
     //std::cout << "[MsgParser] Исходящее сообщение: " << oh.get() << std::endl;
-    Log::info("Msgparser", "[OUT >>>]", oh.get());
+    Log::info("Msgparser", TAG_OUT, oh.get());
 }
 
 void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage *pumsg) {

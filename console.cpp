@@ -8,94 +8,107 @@
 extern std::string g_serverAddr;
 extern Addressbook::Contact myProfile; // Убедитесь, что это объявлено в addressbook.h!
 
-std::string Console::getSystemPrompt() {
-    std::string addr = g_serverAddr.empty() ? "unknown" : g_serverAddr;
+MsgParser parser;
+extern WSclient wsclient;
 
-    // Используем глобальную переменную myProfile
-    uint16_t myId = myProfile.id;
+// Глобальные переменные для "умной" консоли
+std::mutex consoleMutex;
+std::string g_currentInput; // Хранит то, что пользователь печатает прямо сейчас
+//std::string g_serverAddr = "unknown"; // <-- ДОБАВЛЕНО: для надежного хранения адреса
 
-    return "\033[1;32m" + addr + "@" + std::to_string(myId) + "\033[0m > ";
-}
-
+// Функция для перерисовки приглашения и текущего ввода
 void Console::redrawPrompt() {
-    // Блокируем только на момент перерисовки
-    std::lock_guard<std::mutex> lock(s_mutex);
-    printf("\r\033[2K%s%s", getSystemPrompt().c_str(), s_currentInput.c_str());
+
+    const std::string sysPrompt = "\r\033[2K\033[1;32m" + g_serverAddr + "@" + std::to_string(myProfile.id) + ">\033[0m ";
+
+    // Используем printf вместо std::cout для надежности в raw-режиме
+    //printf("%s%s", getSystemPrompt().c_str(), g_currentInput.c_str());
+    printf("%s%s", sysPrompt.c_str(), g_currentInput.c_str());
     fflush(stdout);
 }
 
 std::string Console::readLineWithRedraw() {
-    // 1. Очищаем буфер ввода под защитой мьютекса
-    {
-        std::lock_guard<std::mutex> lock(s_mutex);
-        s_currentInput.clear();
-    }
+    g_currentInput.clear();
 
-    // 2. Настраиваем терминал в raw-режим (БЕЗ логирования, чтобы не вызвать deadlock)
+    // Сохраняем старые настройки терминала
     struct termios oldt, newt;
-    if (tcgetattr(STDIN_FILENO, &oldt) < 0) {
-        return ""; // Тихо возвращаем пустую строку при ошибке
-    }
-
+    tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO); // Отключаем канонический режим и эхо
 
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
-        return "";
-    }
+    // Отключаем канонический режим (построчный ввод) и эхо (автоматический вывод символов)
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
-    // 3. Рисуем начальный промпт
-    redrawPrompt();
+    redrawPrompt(); // Рисуем начальное "> "
 
-    // 4. Цикл чтения символов
-    while (true) {
+    while (wsclient.running) {
         char c;
-        ssize_t n = read(STDIN_FILENO, &c, 1);
-
-        if (n < 0 || n == 0) {
-            break; // Ошибка или EOF
-        }
-
-        // Блокируем мьютекс только для изменения состояния и перерисовки
-        std::lock_guard<std::mutex> lock(s_mutex);
+        // Читаем один символ
+        if (read(STDIN_FILENO, &c, 1) < 0) break;
 
         if (c == '\n' || c == '\r') {
-            std::cout << std::endl; // Финальный перенос строки
+            std::cout << std::endl; // Финальный перенос строки при нажатии Enter
             break;
         }
-        else if (c == 127 || c == 8) { // Backspace
-            if (!s_currentInput.empty()) {
-                s_currentInput.pop_back();
-                printf("\r\033[2K%s%s", getSystemPrompt().c_str(), s_currentInput.c_str());
-                fflush(stdout);
+        else if (c == 127 || c == 8) { // Backspace (ASCII 127 или 8)
+            if (!g_currentInput.empty()) {
+                g_currentInput.pop_back();
+                redrawPrompt();
             }
         }
-        else if (c >= 32 && c <= 126) { // Печатаемые символы
-            s_currentInput += c;
-            printf("\r\033[2K%s%s", getSystemPrompt().c_str(), s_currentInput.c_str());
-            fflush(stdout);
+        else if (c >= 32 && c <= 126) { // Печатаемые символы (буквы, цифры, пробел)
+            g_currentInput += c;
+            redrawPrompt();
         }
+        // Примечание: стрелки влево/вправо здесь не обрабатываются для простоты,
+        // но базовый ввод и стирание работают идеально.
     }
 
-    // 5. Восстанавливаем настройки терминала
+    // Восстанавливаем нормальные настройки терминала
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 
-    // 6. Возвращаем результат
-    std::string result;
-    {
-        std::lock_guard<std::mutex> lock(s_mutex);
-        result = s_currentInput;
-        s_currentInput.clear();
-    }
-
+    std::string result = g_currentInput;
+    g_currentInput.clear();
     return result;
 }
 
-std::string Console::getCurrentInput() {
-    std::lock_guard<std::mutex> lock(s_mutex);
-    return s_currentInput;
-}
+// Поток интерактивного ввода
+void Console::consoleInputThread(WSclient* client) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-std::mutex& Console::getMutex() {
-    return s_mutex;
+    {
+        std::lock_guard<std::mutex> lock(consoleMutex);
+        std::cout << "\nФормат: what.todo.howmuch. msg" << std::endl;
+        std::cout << "Пример: toss..1234. hello" << std::endl;
+        std::cout << "Для выхода введите 'exit'\n" << std::endl;
+        //std::cout << "> " << std::flush;
+    }
+
+    while (client->running) {
+        /*std::string line;
+
+        {
+            std::lock_guard<std::mutex> lock(consoleMutex);
+            std::getline(std::cin, line);
+        }*/
+
+        // Используем нашу новую функцию вместо std::getline
+        std::string line = readLineWithRedraw();
+
+        if (line == "exit" || line == "quit") {
+            client->running = 0;
+            break;
+        }
+
+        if (!line.empty()) {
+            MsgParser::PuhegUpperMessage pumsg; // Чистый экземпляр для каждой команды
+            parser.parseFlatCommand(line, &pumsg);
+            client->sendMessage(&pumsg);
+
+            // После отправки команды курсор и так будет внизу,
+            // но на всякий случай перерисуем промпт для следующей команды
+            //std::lock_guard<std::mutex> lock(consoleMutex);
+            redrawPrompt();
+        }
+    }
 }
