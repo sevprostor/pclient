@@ -1,39 +1,43 @@
 #pragma once
-#include <iostream>
-#include <vector>
-#include <queue>
 #include <string>
+#include <queue>
 #include <chrono>
+#include <vector>
 #include <libwebsockets.h>
 #include "msgparser.h"
 
 class WSclient {
 public:
-    // Состояние
-    struct lws *wsi;
-    int running;
-    int lastNnc;
-    int resendTries;
+    void initContext();
+    bool connectWS(const std::string& wsAddr); // <-- Изменили на const ссылку
 
-    // Главный семафор и буфер
-    bool isLineBusy;
+    void service(int timeout_ms);
+    void destroyContext();
+
+    void sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend = false);
+    void processTimers();
+
+    static int callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reason,
+                                  void *user, void *in, size_t len);
+
+    int running = 1;
+
+private:
+    struct lws_context* lws_ctx_ = nullptr; // <-- ОБЯЗАТЕЛЬНО ЗДЕСЬ
+    struct lws* wsi = nullptr;
+
+    int64_t lastNnc = -1;
+    int resendTries = 0;
+    bool isLineBusy = false;
+
     std::queue<MsgParser::PuhegUpperMessage> messageBuffer;
     MsgParser::PuhegUpperMessage sentMessage;
 
-    // Таймеры
-    std::chrono::steady_clock::time_point lastTimeoutCheck;
     std::chrono::steady_clock::time_point lastBufferCheck;
     std::chrono::steady_clock::time_point lastResendCheck;
+    std::chrono::steady_clock::time_point lastTimeoutCheck;
 
-    // Методы
-    void initContext();
     void sendSuccess(struct lws *wsiParam);
-    void sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend = false);
-    void processTimers();
     void successReceived();
-    static int64_t extractNnc(const msgpack::object& obj);
-
-    // Статический callback для libwebsockets
-    static int callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reason,
-                                  void *user, void *in, size_t len);
+    int64_t extractNnc(const msgpack::object& obj);
 };

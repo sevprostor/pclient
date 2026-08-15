@@ -1,64 +1,26 @@
 #include "wsclient.h"
 #include "msgparser.h"
+#include "addressbook.h"
+#include "console.h"
+#include "tun.h"
+#include "log.h"
+#include "config.h"
+
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <cstring>
-#include <cstdlib>
-#include <mutex>
 
 WSclient wsclient;
-MsgParser parser;
+Console console;
+TunInterface tun;
+//MsgParser parser;
+Config config;
 
-// Глобальный мьютекс для защиты консоли от гонок потоков
-std::mutex consoleMutex;
+//std::string g_serverAddr = "unknown";
+//std::string g_tunName = "tun0"; // Имя TUN-интерфейса по умолчанию
 
-static struct lws_protocols protocols[] = {
-    { "qos2-protocol", WSclient::callbackQos2Client, 0, 0, 0, nullptr, 0 },
-    { nullptr, nullptr, 0, 0, 0, nullptr, 0 }
-};
-
-// Поток интерактивного ввода
-void consoleInputThread(WSclient* client) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-
-    {
-        std::lock_guard<std::mutex> lock(consoleMutex);
-        std::cout << "\n[Console] Интерактивный режим готов. Формат: what.todo.howmuch. msg" << std::endl;
-        std::cout << "[Console] Пример: toss..1234. hello" << std::endl;
-        std::cout << "[Console] Для выхода введите 'exit'\n" << std::endl;
-        std::cout << "> " << std::flush;
-    }
-
-    while (client->running) {
-        std::string line;
-
-        {
-            std::lock_guard<std::mutex> lock(consoleMutex);
-            std::getline(std::cin, line);
-        }
-
-        if (line == "exit" || line == "quit") {
-            client->running = 0;
-            break;
-        }
-
-        if (!line.empty()) {
-            MsgParser::PuhegUpperMessage pumsg; // Чистый экземпляр для каждой команды
-            parser.parseFlatCommand(line, &pumsg);
-            client->sendMessage(&pumsg);
-
-            std::lock_guard<std::mutex> lock(consoleMutex);
-            std::cout << "> " << std::flush;
-        }
-    }
-}
-
-// НОВЫЙ ПОТОК: Независимый обработчик таймеров
 void timerThread(WSclient* client) {
     while (client->running) {
-        // Спим ровно 500 мс. Это гарантирует, что таймеры будут проверяться
-        // с точностью до миллисекунды, независимо от блокировок lws_service.
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         client->processTimers();
     }
@@ -66,56 +28,52 @@ void timerThread(WSclient* client) {
 
 int main(int argc, char **argv) {
     std::srand(std::time(nullptr));
-    wsclient.initContext();
 
-    struct lws_context_creation_info info;
-    std::memset(&info, 0, sizeof(info));
-    info.port = CONTEXT_PORT_NO_LISTEN;
-    info.protocols = protocols;
-    info.user = &wsclient;
+    // 1. Загружаем настройки из файла (если существует)
+    config.loadFromFile("pclient.conf");
 
-    struct lws_context *lws_ctx = lws_create_context(&info);
-    if (!lws_ctx) {
-        std::cerr << "Critical: lws_create_context failed" << std::endl;
-        return 1;
+    // 2. Парсим командную строку (имеет приоритет над конфигом)
+    if (!config.parseCommandLine(argc, argv)) {
+        return 1; // Ошибка парсинга или -help
     }
 
-    struct lws_client_connect_info i;
-    std::memset(&i, 0, sizeof(i));
-    i.context = lws_ctx;
-    i.address = (argc >= 2) ? argv[1] : "puheg.local";
-    i.port = 80;
-    i.path = "/ws";
-    i.host = i.address;
-    i.origin = i.address;
-    i.protocol = protocols[0].name;
+    //g_serverAddr = (argc >= 2) ? argv[1] : "puheg.local";
 
-    lws_client_connect_via_info(&i);
+    // 1. Инициализация
+    wsclient.initContext();
+    //wsclient.connectWS(g_serverAddr);
+    wsclient.connectWS(config.ws_address);
+
+
+    // 2. Открываем TUN-интерфейс
+    bool tunEnabled = false;
+    //if (tun.open(g_tunName)) {
+    if (tun.open(config.tun_interface)) {
+        tunEnabled = true;
+        Log::info("Main", "TUN-интерфейс '", config.tun_interface, "' успешно открыт.");
+    } else {
+        Log::error("Main", "Не удалось открыть TUN. Работа без сетевого моста.");
+    }
+
+    // 2. Потоки
+    std::thread input_thread(&Console::consoleInputThread, &console, &wsclient);
+    std::thread timers_thread(timerThread, &wsclient);
+    std::thread tun_thread(&TunInterface::tunReaderThread, &tun, &wsclient);
+
     std::cout << "[System] TCP/IP Клиент запущен. Вход в сетевой цикл..." << std::endl;
 
-    // Запускаем потоки
-    std::thread input_thread(consoleInputThread, &wsclient);
-    std::thread timers_thread(timerThread, &wsclient); // <-- Запуск независимого потока таймеров
-
-    // ГЛАВНЫЙ ЦИКЛ: Теперь он отвечает ТОЛЬКО за сетевые события libwebsockets
+    // 3. Главный цикл (теперь работает корректно!)
     while (wsclient.running) {
-        // Можно оставить 50 или 0. Поскольку таймеры вынесены в отдельный поток,
-        // блокировка lws_service больше не влияет на логику приложения.
-        lws_service(lws_ctx, 50);
+        wsclient.service(50);
     }
 
-    // Корректное завершение
-    if (input_thread.joinable()) {
-        std::cout << "[System] Нажмите Enter для завершения работы..." << std::endl;
-        input_thread.join();
-    }
+    // 4. Завершение
+    if (input_thread.joinable()) input_thread.join();
+    if (timers_thread.joinable()) timers_thread.join();
+    if (tun_thread.joinable()) tun_thread.join();
 
-    // Останавливаем поток таймеров (он выйдет из цикла, так как running = 0)
-    if (timers_thread.joinable()) {
-        timers_thread.join();
-    }
+    wsclient.destroyContext(); // Теперь работает корректно!
 
-    lws_context_destroy(lws_ctx);
     std::cout << "[System] Работа программы успешно завершена." << std::endl;
     return 0;
 }

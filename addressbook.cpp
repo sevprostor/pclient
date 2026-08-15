@@ -1,14 +1,18 @@
 #include "addressbook.h"
 #include "log.h"
 
+// Глобальные переменные (определения)
+Addressbook::Contact myProfile;
+std::map<uint16_t, Addressbook::Contact> contacts;
+
 void Addressbook::setMyProfile(uint16_t id, const Contact& profile) {
     std::unique_lock lock(ab_mutex);
     my_id = id;
-    my_profile = profile;
+    myProfile = profile;
     //std::cout << "[Addressbook] Успешно сохранен собственный профиль. Мой ID: "
-    //          << my_id << ", Публичный ключ: " << my_profile.key << std::endl;
+    //          << my_id << ", Публичный ключ: " << myProfile.key << std::endl;
 
-    Log::info("Addressbook", "MAC-адрес интерфейса: ", my_id, ", pubkey: ", my_profile.key);
+    Log::info("Addressbook", "MAC-адрес интерфейса: ", my_id, ", pubkey: ", myProfile.key);
 }
 
 void Addressbook::setContact(uint16_t id, const Contact& contact) {
@@ -60,7 +64,7 @@ void Addressbook::print() const {
     if (my_id == 0) std::cout << "НЕ ОПРЕДЕЛЕН" << std::endl;
     else std::cout << my_id << std::endl;
 
-    if (!my_profile.key.empty()) std::cout << "  * Мой Публичный Ключ:          " << my_profile.key << std::endl;
+    if (!myProfile.key.empty()) std::cout << "  * Мой Публичный Ключ:          " << myProfile.key << std::endl;
     std::cout << "  * Всего обнаружено контактов:  " << contacts.size() << std::endl;
 
     for (const auto& [id, c] : contacts) {
