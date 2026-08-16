@@ -48,6 +48,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
             // Безопасное приведение к uint8_t
             if (rec_map.count("chanComm")) c.chanComm = static_cast<uint8_t>(rec_map["chanComm"].as<uint64_t>());
             if (rec_map.count("netsp")) c.netsp = static_cast<uint8_t>(rec_map["netsp"].as<uint64_t>());
+            if (rec_map.count("netSpeed")) c.netsp = static_cast<uint8_t>(rec_map["netSpeed"].as<uint64_t>());
 
             if (rec_map.count("key")) c.key = rec_map["key"].as<std::string>();
 

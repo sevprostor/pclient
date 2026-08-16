@@ -5,14 +5,25 @@
 Addressbook::Contact myProfile;
 std::map<uint16_t, Addressbook::Contact> contacts;
 
+std::function<void()> Addressbook::onProfileReadyCallback = nullptr;
+
+void Addressbook::setOnProfileReadyCallback(std::function<void()> callback) {
+    onProfileReadyCallback = callback;
+}
+
 void Addressbook::setMyProfile(uint16_t id, const Contact& profile) {
     std::unique_lock lock(ab_mutex);
-    my_id = id;
+    //my_id = id;
     myProfile = profile;
     //std::cout << "[Addressbook] Успешно сохранен собственный профиль. Мой ID: "
     //          << my_id << ", Публичный ключ: " << myProfile.key << std::endl;
 
-    Log::info("Addressbook", "MAC-адрес интерфейса: ", my_id, ", pubkey: ", myProfile.key);
+    Log::info("Addressbook", "\n===Local profile===\nMAC:", myProfile.id, ", IP:", myProfile.ipString(), "\nListen spd:", static_cast<int>(myProfile.netsp), ", Listen channel:", static_cast<int>(myProfile.chanComm));
+
+    // ТРИГГЕР: Уведомляем систему, что профиль готов и можно настраивать сеть
+    if (onProfileReadyCallback) {
+        onProfileReadyCallback();
+    }
 }
 
 void Addressbook::setContact(uint16_t id, const Contact& contact) {
@@ -57,22 +68,15 @@ bool Addressbook::getContact(uint16_t id, Contact& out_contact) const {
 
 void Addressbook::print() const {
     std::shared_lock lock(ab_mutex);
-    std::cout << "\n=========================================================" << std::endl;
-    std::cout << "             АКТУАЛЬНАЯ АДРЕСНАЯ КНИГА В ПАМЯТИ           " << std::endl;
-    std::cout << "---------------------------------------------------------" << std::endl;
-    std::cout << "  * Мой собственный Сетевой ID: ";
-    if (my_id == 0) std::cout << "НЕ ОПРЕДЕЛЕН" << std::endl;
-    else std::cout << my_id << std::endl;
 
-    if (!myProfile.key.empty()) std::cout << "  * Мой Публичный Ключ:          " << myProfile.key << std::endl;
-    std::cout << "  * Всего обнаружено контактов:  " << contacts.size() << std::endl;
+    Log::info("Addressbook", "\n===Loaded total ", contacts.size(), " contacts===\n");
 
     for (const auto& [id, c] : contacts) {
-        std::cout << "    - Узел [" << id << "] -> Канал (chanComm): " << static_cast<int>(c.chanComm)
+        std::cout << id << "(" << c.ipString() << "), Канал (chanComm): " << static_cast<int>(c.chanComm)
                   << ", Скорость (netsp): " << static_cast<int>(c.netsp);
 
         if (!c.name.empty()) std::cout << ", Имя/Лейбл: \"" << c.name << "\"";
         std::cout << std::endl;
     }
-    std::cout << "=========================================================\n" << std::endl;
+    std::cout << std::endl << std::endl;
 }

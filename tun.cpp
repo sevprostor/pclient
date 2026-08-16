@@ -1,65 +1,215 @@
 #include "tun.h"
+#include "wsclient.h"
+#include "msgparser.h"
 #include "log.h"
 
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
 #include <sys/ioctl.h>
-#include <linux/if.h>
-#include <linux/if_tun.h>
 #include <cerrno>
 #include <iostream>
+#include <cstdlib>
+
+// ВАЖНО: Сначала системные заголовки, потом linux-специфичные
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <ifaddrs.h>
+#include <net/if.h>        // <-- Сначала этот
+#include <linux/if.h>      // <-- Потом этот (чтобы избежать конфликтов)
+#include <linux/if_tun.h>
 
 TunInterface::TunInterface() {}
 
 TunInterface::~TunInterface() {
+    stop();
     close();
 }
 
-// Поток чтения из TUN (метод класса, используем this)
-void TunInterface::tunReaderThread(WSclient* client) {
+std::string TunInterface::ipToString(uint32_t ip) {
+    struct in_addr addr;
+    addr.s_addr = ip;
+    char str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr, str, INET_ADDRSTRLEN);
+    return std::string(str);
+}
+
+bool TunInterface::findByIp(uint32_t targetIp) {
+    std::string expectedIpStr = ipToString(targetIp);
+    Log::info("TUN", "Ищем интерфейс с IP: ", expectedIpStr);
+
+    struct ifaddrs *ifaddr, *ifa;
+
+    if (getifaddrs(&ifaddr) == -1) {
+        Log::error("TUN", "getifaddrs failed");
+        return false;
+    }
+
+    for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) continue;
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+
+        if (strncmp(ifa->ifa_name, "tun", 3) != 0) continue;
+
+        struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+
+        if (addr->sin_addr.s_addr == targetIp) {
+            Log::info("TUN", "Найден интерфейс: ", ifa->ifa_name, " с IP ", expectedIpStr);
+            freeifaddrs(ifaddr);
+            return open(ifa->ifa_name);
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    Log::info("TUN", "Интерфейс с IP ", expectedIpStr, " не найден");
+    return false;
+}
+
+bool TunInterface::createWithIp(const std::string& ifname, uint32_t ip,
+                                int netmask, int mtu) {
+    std::string ipStr = ipToString(ip);
+    Log::info("TUN", "Создаем интерфейс ", ifname, " с IP ", ipStr, "/", netmask);
+
+    const char* user = getenv("USER");
+    if (!user) user = "root";
+
+    std::string cmd = "ip tuntap add dev " + ifname + " mode tun user " + user;
+    if (system(cmd.c_str()) != 0) {
+        Log::error("TUN", "Не удалось создать интерфейс. Возможно, нужны права root.");
+        return false;
+    }
+
+    cmd = "ip addr add " + ipStr + "/" + std::to_string(netmask) + " dev " + ifname;
+    if (system(cmd.c_str()) != 0) {
+        Log::error("TUN", "Не удалось назначить IP");
+        return false;
+    }
+
+    cmd = "ip link set " + ifname + " mtu " + std::to_string(mtu);
+    system(cmd.c_str());
+
+    cmd = "ip link set " + ifname + " up";
+    if (system(cmd.c_str()) != 0) {
+        Log::error("TUN", "Не удалось поднять интерфейс");
+        return false;
+    }
+
+    //запрет IP6
+    cmd = "sysctl -w net.ipv6.conf." + ifname + ".disable_ipv6=1";
+    system(cmd.c_str());
+
+    Log::info("TUN", "Интерфейс ", ifname, " создан и настроен");
+    return open(ifname);
+}
+
+bool TunInterface::init(uint32_t ip, const std::string& ifname,
+                        int netmask, int mtu) {
+    std::string ipStr = ipToString(ip);
+    Log::info("TUN", "Инициализация TUN для IP: ", ipStr);
+
+    if (findByIp(ip)) {
+        Log::info("TUN", "✅ Найден существующий TUN-интерфейс: ", ifname_);
+        return true;
+    }
+
+    Log::info("TUN", "Попытка создать TUN-интерфейс автоматически...");
+    if (createWithIp(ifname, ip, netmask, mtu)) {
+        Log::info("TUN", "✅ TUN-интерфейс создан: ", ifname_);
+        return true;
+    }
+
+    Log::error("TUN", "❌ Не удалось создать TUN автоматически.");
+    Log::error("TUN", "Выполните следующие команды вручную:");
+    Log::error("TUN", "  sudo ip tuntap add dev ", ifname, " mode tun user $(whoami)");
+    Log::error("TUN", "  sudo ip addr add ", ipStr, "/", netmask, " dev ", ifname);
+    Log::error("TUN", "  sudo ip link set ", ifname, " mtu ", mtu);
+    Log::error("TUN", "  sudo ip link set ", ifname, " up");
+    Log::error("TUN", "  sudo sysctl -w net.ipv6.conf.", ifname, ".disable_ipv6=1");
+    Log::error("TUN", "Затем перезапустите программу.");
+
+    return false;
+}
+
+void TunInterface::start(WSclient* client) {
+    if (!isOpen()) {
+        Log::info("TUN", "Невозможно запустить: интерфейс не открыт");
+        return;
+    }
+
+    if (readerThread_.joinable()) {
+        Log::info("TUN", "Поток чтения уже запущен");
+        return;
+    }
+
+    running_ = true;
+    readerThread_ = std::thread(&TunInterface::readerThread, this, client);
+    Log::info("TUN", "Поток чтения пакетов запущен");
+}
+
+void TunInterface::stop() {
+    if (running_) {
+        running_ = false;
+    }
+
+    if (readerThread_.joinable()) {
+        readerThread_.join();
+        Log::info("TUN", "Поток чтения остановлен");
+    }
+}
+
+void TunInterface::readerThread(WSclient* client) {
     Log::info("TUN", "Поток чтения TUN запущен.");
 
     std::vector<uint8_t> packet;
 
-    while (client->running) {
-        if (this->readPacket(packet)) {  // <-- ИСПРАВЛЕНО: this-> вместо tun.
-            // Парсим Destination IP (байты 16, 17, 18, 19 в IPv4 заголовке)
-            if (packet.size() >= 20) {
-                uint8_t ip1 = packet[16];
-                uint8_t ip2 = packet[17];
-                uint8_t ip3 = packet[18];
-                uint8_t ip4 = packet[19];
-
-                // Вычисляем MAC по вашей формуле
-                uint16_t mac = (ip3 << 8) | ip4;
-
-                Log::info("TUN", "Пакет ", packet.size(), " байт. Dest IP: ",
-                          ip1, ".", ip2, ".", ip3, ".", ip4, " -> MAC: ", mac);
-            }
+    while (running_ && client->running) {
+        if (readPacket(packet)) {
+            processPacket(packet);
         }
     }
+
+    Log::info("TUN", "Поток чтения TUN завершен.");
+}
+
+void TunInterface::processPacket(const std::vector<uint8_t>& packet) {
+    if (packet.size() < 20) return;
+
+    // Старшие 4 бита первого байта = версия IP
+    uint8_t version = packet[0] >> 4;
+
+    if (version != 4) {
+        // IPv6 или что-то еще — игнорируем
+        Log::info("TUN", "Пропуск: пакет не IPv4 (версия ", (int)version,
+                  "), размер ", packet.size(), " байт");
+        return;
+    }
+
+    // Приводим к unsigned, чтобы печаталось ЧИСЛО, а не символ
+    unsigned ip1 = packet[16];
+    unsigned ip2 = packet[17];
+    unsigned ip3 = packet[18];
+    unsigned ip4 = packet[19];
+
+    uint16_t mac = (ip3 << 8) | ip4;
+
+    Log::info("TUN", "Пакет ", packet.size(), " байт. Dest IP: ",
+              ip1, ".", ip2, ".", ip3, ".", ip4, " -> MAC: ", mac);
 }
 
 bool TunInterface::open(const std::string& ifname) {
     ifname_ = ifname;
 
-    // 1. Открываем устройство TUN
     fd_ = ::open("/dev/net/tun", O_RDWR);
     if (fd_ < 0) {
         Log::error("TUN", "Не удалось открыть /dev/net/tun. Нужны права root или CAP_NET_ADMIN.");
         return false;
     }
 
-    // 2. Настраиваем интерфейс
     struct ifreq ifr;
     std::memset(&ifr, 0, sizeof(ifr));
 
-    // IFF_TUN - режим TUN (только IP пакеты, без Ethernet заголовков)
-    // IFF_NO_PI - не добавлять Packet Information (лишние 4 байта в начале)
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
 
-    // Копируем имя интерфейса (макс 16 символов)
     if (ifname.length() >= sizeof(ifr.ifr_name)) {
         Log::error("TUN", "Имя интерфейса слишком длинное");
         ::close(fd_);
@@ -68,7 +218,6 @@ bool TunInterface::open(const std::string& ifname) {
     }
     std::strncpy(ifr.ifr_name, ifname.c_str(), sizeof(ifr.ifr_name) - 1);
 
-    // 3. Создаем интерфейс через ioctl
     if (ioctl(fd_, TUNSETIFF, (void*)&ifr) < 0) {
         Log::error("TUN", "ioctl TUNSETIFF failed: ", std::strerror(errno));
         ::close(fd_);
@@ -76,7 +225,6 @@ bool TunInterface::open(const std::string& ifname) {
         return false;
     }
 
-    // Сохраняем реальное имя (ядро могло его немного изменить)
     ifname_ = ifr.ifr_name;
     Log::info("TUN", "Интерфейс ", ifname_, " успешно открыт.");
     return true;
@@ -93,13 +241,12 @@ void TunInterface::close() {
 bool TunInterface::readPacket(std::vector<uint8_t>& packet) {
     if (fd_ < 0) return false;
 
-    // Стандартный MTU для Ethernet + запас на заголовки
     packet.resize(2048);
 
     ssize_t len = ::read(fd_, packet.data(), packet.size());
 
     if (len > 0) {
-        packet.resize(len); // Обрезаем вектор до реального размера пакета
+        packet.resize(len);
         return true;
     }
 

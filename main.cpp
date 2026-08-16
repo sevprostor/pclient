@@ -39,26 +39,34 @@ int main(int argc, char **argv) {
 
     //g_serverAddr = (argc >= 2) ? argv[1] : "puheg.local";
 
+
+
     // 1. Инициализация
     wsclient.initContext();
     //wsclient.connectWS(g_serverAddr);
     wsclient.connectWS(config.ws_address);
 
 
-    // 2. Открываем TUN-интерфейс
-    bool tunEnabled = false;
-    //if (tun.open(g_tunName)) {
-    if (tun.open(config.tun_interface)) {
-        tunEnabled = true;
-        Log::info("Main", "TUN-интерфейс '", config.tun_interface, "' успешно открыт.");
-    } else {
-        Log::error("Main", "Не удалось открыть TUN. Работа без сетевого моста.");
-    }
+    // РЕГИСТРАЦИЯ КОЛЛБЕКА (без аргументов)
+    Addressbook::setOnProfileReadyCallback([&]() {
+        Log::info("Main", "Сигнал: Профиль устройства получен. Начинаем настройку TUN...");
+
+        //Addressbook::Contact myProfile = Addressbook::getMyProfile();
+        //uint32_t myIp = myProfile.ipAddr();
+
+        Log::info("Main", "Мой MAC: ", myProfile.id, ", Вычисленный IP: ", myProfile.ipString());
+
+        if (tun.init(myProfile.ipAddr(), config.tun_interface, config.tun_netmask, config.tun_mtu)) {
+            tun.start(&wsclient);  // <-- Правильный вызов
+        } else {
+            Log::info("Main", "TUN не инициализирован. Сетевой мост работать не будет.");
+        }
+    });
 
     // 2. Потоки
     std::thread input_thread(&Console::consoleInputThread, &console, &wsclient);
     std::thread timers_thread(timerThread, &wsclient);
-    std::thread tun_thread(&TunInterface::tunReaderThread, &tun, &wsclient);
+    //std::thread tun_thread(&TunInterface::tunReaderThread, &tun, &wsclient);
 
     std::cout << "[System] TCP/IP Клиент запущен. Вход в сетевой цикл..." << std::endl;
 
@@ -67,12 +75,14 @@ int main(int argc, char **argv) {
         wsclient.service(50);
     }
 
-    // 4. Завершение
+    std::cout << "\n[System] Завершение работы..." << std::endl;
+
     if (input_thread.joinable()) input_thread.join();
     if (timers_thread.joinable()) timers_thread.join();
-    if (tun_thread.joinable()) tun_thread.join();
 
-    wsclient.destroyContext(); // Теперь работает корректно!
+    tun.stop();
+    tun.close();
+    wsclient.destroyContext();
 
     std::cout << "[System] Работа программы успешно завершена." << std::endl;
     return 0;
