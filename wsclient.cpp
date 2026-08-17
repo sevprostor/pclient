@@ -139,9 +139,11 @@ void WSclient::processTimers() {
     auto currentTime = std::chrono::steady_clock::now();
 
     auto passedBufferMs = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - this->lastBufferCheck).count();
-    if (passedBufferMs >= 500) {
+
+    //проверка буфера неотправленных сообщений
+    if (passedBufferMs >= 1000) { //было 500
         this->lastBufferCheck = currentTime;
-        if (!this->isLineBusy && this->wsi != nullptr && !this->messageBuffer.empty()) {
+        if (!this->isLineBusy && this->wsi != nullptr && !this->messageBuffer.empty() && !MsgParser::isDeviceBusy()) { //добавлено !MsgParser::isDeviceBusy()
             MsgParser::PuhegUpperMessage nextMsg = this->messageBuffer.front();
             this->messageBuffer.pop();
             sendMessage(&nextMsg, false);
