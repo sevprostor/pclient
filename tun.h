@@ -35,8 +35,13 @@ private:
     std::atomic<bool> running_{false};
 
     void readerThread(WSclient* client);  // <-- private метод
-    void processPacket(const std::vector<uint8_t>& packet);
+    //void processPacket(const std::vector<uint8_t>& packet);
+    void processPacket(const std::vector<uint8_t>& packet, WSclient* client); // <-- + client
+
+
     bool findByIp(uint32_t targetIp);
     bool createWithIp(const std::string& ifname, uint32_t ip,
                       int netmask, int mtu);
+
+
 };

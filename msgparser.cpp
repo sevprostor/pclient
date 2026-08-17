@@ -1,12 +1,16 @@
 #include "msgparser.h"
 #include "addressbook.h" // Обязательный инклуд для работы с адресной книгой
 #include "log.h"
+#include "tun.h"
+
 #include <sstream>
 #include <cstdlib>
 #include <map>
 #include <string>
 
 #include "logcolors.h"
+
+extern TunInterface tun;
 
 MsgParser::RunningProcess runningProc;
 
@@ -19,28 +23,22 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     obj.convert(root_map);
 
     //ВЫВОД СЫРОГО JSON НАПРЯМУЮ
-    //Без всяких условий
-    //std::cout << "\n========================================" << std::endl;
-    //std::cout << "[MsgParser] Входящее сообщение:" << std::endl;
-    //std::cout << "----------------------------------------" << std::endl;
-    //std::cout << obj << std::endl; // Выводит дерево элементов одной строкой кода
-    //std::cout << "========================================\n" << std::endl;
     Log::info("Msgparser", TAG_IN, obj);
 
     // =========================================================================
     // БЛОК 1: ADDRESSBOOK (Аналог Python: if isinstance(adressbook, dict))
     // =========================================================================
-    auto ab_it = root_map.find("addressbook");
+    auto thisIsAddressbook = root_map.find("addressbook");
     //не понимаю, уточнить
-    if (ab_it != root_map.end() && ab_it->second.type == msgpack::type::MAP) {
+    if (thisIsAddressbook != root_map.end() && thisIsAddressbook->second.type == msgpack::type::MAP) {
         std::map<std::string, msgpack::object> ab_map;
-        ab_it->second.convert(ab_map);
+        thisIsAddressbook->second.convert(ab_map);
 
         // А. Обработка единичного контакта (addressbook.record)
-        auto rec_it = ab_map.find("record");
-        if (rec_it != ab_map.end() && rec_it->second.type == msgpack::type::MAP) {
+        auto thisIsABRec = ab_map.find("record");
+        if (thisIsABRec != ab_map.end() && thisIsABRec->second.type == msgpack::type::MAP) {
             std::map<std::string, msgpack::object> rec_map;
-            rec_it->second.convert(rec_map);
+            thisIsABRec->second.convert(rec_map);
 
             Addressbook::Contact c;
             if (rec_map.count("id")) c.id = static_cast<uint16_t>(rec_map["id"].as<uint64_t>());
@@ -63,10 +61,10 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
         }
 
         // Б. Обработка полного списка контактов (addressbook.contacts)
-        auto contacts_it = ab_map.find("contacts");
-        if (contacts_it != ab_map.end() && contacts_it->second.type == msgpack::type::MAP) {
+        auto thisIsFullAB = ab_map.find("contacts");
+        if (thisIsFullAB != ab_map.end() && thisIsFullAB->second.type == msgpack::type::MAP) {
             std::map<std::string, msgpack::object> contacts_map;
-            contacts_it->second.convert(contacts_map);
+            thisIsFullAB->second.convert(contacts_map);
 
             // Временный C++ словарь для пакетной загрузки контактов (ключ — uint16_t)
             std::map<uint16_t, Addressbook::Contact> parsed_batch;
@@ -108,15 +106,13 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     // БЛОК 2: PROCESS (Аналог Python: if isinstance(proc, dict))
     // =========================================================================
 
-    auto proc_it = root_map.find("process");
-    if (proc_it != root_map.end() && proc_it->second.type == msgpack::type::MAP) {
+    auto thisIsProcess = root_map.find("process");
+    if (thisIsProcess != root_map.end() && thisIsProcess->second.type == msgpack::type::MAP) {
         std::map<std::string, msgpack::object> proc_map;
-        proc_it->second.convert(proc_map);
+        thisIsProcess->second.convert(proc_map);
 
         std::string state = proc_map.count("state") ? proc_map["state"].as<std::string>() : "";
         std::string thread = proc_map.count("thread") ? proc_map["thread"].as<std::string>() : "";
-
-        //std::cout << "[MsgParser] Обработка шага процесса '" << thread << "' -> Статус: " << state << std::endl;
 
         if(runningProc.justLaunched){
             Log::info("Process", "Новый процесс ", thread, " зарегистрирован как активный.");
@@ -134,37 +130,48 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
     }
 
-    /*
-    for (const auto& [key, value] : root_map) {
-        // Нас интересуют только вложенные словари (MAP)
-        if (value.type == msgpack::type::MAP) {
-            std::map<std::string, msgpack::object> inner_map;
-            value.convert(inner_map);
+    // Обработка транспорта
+    auto thisIsTransport = root_map.find("transport");
+    if (thisIsTransport != root_map.end() && thisIsTransport->second.type == msgpack::type::MAP) {
+        std::map<std::string, msgpack::object> transport_map;
+        thisIsTransport->second.convert(transport_map);
 
-            std::string state = "";
-            std::string thread_or_parent = "";
+        // Ищем downlink
+        auto thisIsDownlink = transport_map.find("downlink");
+        if (thisIsDownlink != transport_map.end() && thisIsDownlink->second.type == msgpack::type::MAP) {
+            std::map<std::string, msgpack::object> downlink_map;
+            thisIsDownlink->second.convert(downlink_map);
 
-            // Вариант А: Это полноценный блок "process" (есть поле "thread")
-            if (inner_map.count("thread")) {
-                thread_or_parent = inner_map["thread"].as<std::string>();
-                if (inner_map.count("state")) {
-                    state = inner_map["state"].as<std::string>();
+            // Ищем packet
+            auto thisIsPacket = downlink_map.find("packet");
+            if (thisIsPacket != downlink_map.end()) {
+                // Извлекаем бинарные данные
+                std::vector<uint8_t> packetBytes;
+
+                if (thisIsPacket->second.type == msgpack::type::BIN) {
+                    msgpack::type::raw_ref raw;
+                    thisIsPacket->second.convert(raw);
+                    packetBytes.assign(raw.ptr, raw.ptr + raw.size);
+                } else if (thisIsPacket->second.type == msgpack::type::ARRAY) {
+                    // Если прошивка отправила как массив байтов
+                    thisIsPacket->second.convert(packetBytes);
+                } else {
+                    Log::info("MsgParser", "downlink.packet имеет неожиданный тип: ", (int)thisIsPacket->second.type);
                 }
-            }
-            // Вариант Б: Это блок задачи типа "transport" (есть поле "parent")
-            else if (inner_map.count("parent")) {
-                thread_or_parent = inner_map["parent"].as<std::string>();
-                if (inner_map.count("state")) {
-                    state = inner_map["state"].as<std::string>();
-                }
-            }
 
-            // Если мы нашли и идентификатор, и состояние, передаем их в монитор
-            if (!state.empty() && !thread_or_parent.empty()) {
-                watchProcess(state, thread_or_parent);
+                // Записываем в TUN, если пакет не пустой
+                if (!packetBytes.empty()) {
+                    Log::info("MsgParser", "📥 Принят пакет, ", packetBytes.size(), " байт");
+
+                    if (tun.writePacket(packetBytes.data(), packetBytes.size())) {
+                        Log::info("MsgParser", "Пакет передан в tun0");
+                    } else {
+                        Log::error("MsgParser", "Не удалось записать пакет в TUN");
+                    }
+                }
             }
         }
-    }*/
+    }
 }
 
 

@@ -109,6 +109,13 @@ void WSclient::sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend) 
         }
         // ------------------------------------
 
+        const size_t MAX_QUEUE = 64; //перенести в wsclient.conf
+
+        if (this->messageBuffer.size() >= MAX_QUEUE) {
+            this->messageBuffer.pop();  // выбрасываем самый старый пакет
+            Log::info("Wsclient", "Очередь переполнена, старый пакет отброшен");
+        }
+
         this->messageBuffer.push(*pumsg);
         return;
     }

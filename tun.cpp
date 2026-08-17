@@ -2,6 +2,7 @@
 #include "wsclient.h"
 #include "msgparser.h"
 #include "log.h"
+#include "addressbook.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -164,36 +165,43 @@ void TunInterface::readerThread(WSclient* client) {
 
     while (running_ && client->running) {
         if (readPacket(packet)) {
-            processPacket(packet);
+            processPacket(packet, client);
         }
     }
 
     Log::info("TUN", "Поток чтения TUN завершен.");
 }
 
-void TunInterface::processPacket(const std::vector<uint8_t>& packet) {
+void TunInterface::processPacket(const std::vector<uint8_t>& packet, WSclient* client) {
     if (packet.size() < 20) return;
 
-    // Старшие 4 бита первого байта = версия IP
+    // ФИЛЬТР 1: только IPv4
     uint8_t version = packet[0] >> 4;
+    if (version != 4) return;
 
-    if (version != 4) {
-        // IPv6 или что-то еще — игнорируем
-        Log::info("TUN", "Пропуск: пакет не IPv4 (версия ", (int)version,
-                  "), размер ", packet.size(), " байт");
+    // Вычисляем целевой MAC из IP назначения
+    uint16_t destMac = (packet[18] << 8) | packet[19];
+
+    // ФИЛЬТР 2: только известные узлы из адресной книги
+    Addressbook::Contact target;
+    if (!Addressbook::getInstance().getContact(destMac, target)) {
         return;
     }
 
-    // Приводим к unsigned, чтобы печаталось ЧИСЛО, а не символ
-    unsigned ip1 = packet[16];
-    unsigned ip2 = packet[17];
-    unsigned ip3 = packet[18];
-    unsigned ip4 = packet[19];
+    // === ОБЕРТКА В СООБЩЕНИЕ ВЕРХНЕГО УРОВНЯ PUHEG ===
+    MsgParser::PuhegUpperMessage pumsg;
+    pumsg.what = "toss";                 // команда передачи данных
+    pumsg.todo = "";
+    pumsg.howmuch = destMac;             // целевой MAC
+    pumsg.msg.assign(packet.begin(), packet.end()); // сырой IP-пакет как полезная нагрузка
 
-    uint16_t mac = (ip3 << 8) | ip4;
+    // Сериализуем в msgpack (id и thread проставятся внутри)
+    parser.packMessage(&pumsg);
 
-    Log::info("TUN", "Пакет ", packet.size(), " байт. Dest IP: ",
-              ip1, ".", ip2, ".", ip3, ".", ip4, " -> MAC: ", mac);
+    // Отправляем через QoS2-механизм (очередь, ресенды)
+    client->sendMessage(&pumsg);
+
+    Log::info("TUN", "📦 IP-пакет ", packet.size(), " байт обернут в toss для MAC ", destMac);
 }
 
 bool TunInterface::open(const std::string& ifname) {
