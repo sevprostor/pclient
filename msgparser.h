@@ -43,6 +43,12 @@ public:
         bool justLaunched = true;
     };
 
+    struct RxTransaction {
+        std::atomic<bool> active{false};
+        uint32_t id = 0;
+        std::chrono::steady_clock::time_point lastMsgTime;
+    };
+
     //Кодировка msg в JsonArray
     std::vector<int> encodeMsg(const std::string& text);
     std::vector<int> encodeMsg(const std::vector<uint8_t>& rawBytes);
@@ -65,9 +71,16 @@ public:
     static void watchProcess(const std::string& state, const std::string& thread);
     static void checkProcessTimeout(); // <-- ДОБАВЛЕНО
 
+    static constexpr int RX_TIMEOUT_MS = 5000; // таймаут разблокировки
+
+    static bool isRxBusy();
+    static void watchTransport(const std::string& state, uint32_t id);
+    static void checkRxTimeout();
+
 };
 
 extern MsgParser parser;
 extern MsgParser::RunningProcess runningProc;
+extern MsgParser::RxTransaction rxTransaction;
 
 #endif // MSGPARSER_H

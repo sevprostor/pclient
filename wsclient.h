@@ -37,6 +37,12 @@ private:
     std::chrono::steady_clock::time_point lastResendCheck;
     std::chrono::steady_clock::time_point lastTimeoutCheck;
 
+    // Время последнего получения сообщения от станции
+    std::chrono::steady_clock::time_point lastReceiveTime;
+
+    // Защитный интервал после приёма (мс), раньше не отправляем
+    static constexpr int POST_RX_GUARD_MS = 500;
+
     void sendSuccess(struct lws *wsiParam);
     void successReceived();
     int64_t extractNnc(const msgpack::object& obj);

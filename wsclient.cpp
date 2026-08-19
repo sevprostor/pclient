@@ -23,6 +23,9 @@ void WSclient::initContext() {
     this->lastBufferCheck = std::chrono::steady_clock::now();
     this->lastResendCheck = std::chrono::steady_clock::now();
     this->lastTimeoutCheck = std::chrono::steady_clock::now();
+
+    // Ставим "давно", чтобы первый пакет не блокировался
+    this->lastReceiveTime = std::chrono::steady_clock::now() - std::chrono::seconds(10);
 }
 
 // 2. Подключение к WS (ИСПРАВЛЕНО: используем this->lws_ctx_)
@@ -95,10 +98,24 @@ void WSclient::sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend) 
         return;
     }
 
+
+    // === НОВОЕ: защитный интервал после приёма ===
+    if (!forceSend) {
+        auto sinceRx = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - this->lastReceiveTime).count();
+        if (sinceRx < POST_RX_GUARD_MS) {
+            Log::info("Wsclient", "ОЖИДАНИЕ: прошло ", sinceRx,
+                      " мс после приёма (нужно ", POST_RX_GUARD_MS, "). Пакет в очередь.");
+            this->messageBuffer.push(*pumsg);
+            return;
+        }
+    }
+    // === КОНЕЦ НОВОГО ===
+
     size_t size = pumsg->packedMsg.size() - LWS_PRE;
     bool isDeviceBusy = MsgParser::isDeviceBusy();
 
-    if (!forceSend && (this->isLineBusy || this->wsi == nullptr || isDeviceBusy)) {
+    if (!forceSend && (this->isLineBusy || this->wsi == nullptr || isDeviceBusy || MsgParser::isRxBusy())) {
         // --- НОВАЯ ДЕТАЛЬНАЯ ДИАГНОСТИКА ---
         if (this->wsi == nullptr) {
             Log::error("Wsclient", "ОТМЕНА: WebSocket еще не подключен (wsi == nullptr). Ждем соединения...");
@@ -106,6 +123,8 @@ void WSclient::sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend) 
             Log::info("Wsclient", "ОЖИДАНИЕ: Линия занята (ждем 'S' от устройства). Пакет в буфер.");
         } else if (isDeviceBusy) {
             Log::info("Wsclient", "ОЖИДАНИЕ: Устройство выполняет процесс. Пакет в буфер.");
+        } else if (MsgParser::isRxBusy()) {
+            Log::info("Wsclient", "ОЖИДАНИЕ: Идет входящий транспорт, пакет в буфер.");
         }
         // ------------------------------------
 
@@ -141,12 +160,30 @@ void WSclient::processTimers() {
     auto passedBufferMs = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - this->lastBufferCheck).count();
 
     //проверка буфера неотправленных сообщений
-    if (passedBufferMs >= 1000) { //было 500
+    if (passedBufferMs >= 500) { //было 500
         this->lastBufferCheck = currentTime;
-        if (!this->isLineBusy && this->wsi != nullptr && !this->messageBuffer.empty() && !MsgParser::isDeviceBusy()) { //добавлено !MsgParser::isDeviceBusy()
-            MsgParser::PuhegUpperMessage nextMsg = this->messageBuffer.front();
-            this->messageBuffer.pop();
-            sendMessage(&nextMsg, false);
+
+        if (!this->isLineBusy &&
+            this->wsi != nullptr &&
+            !this->messageBuffer.empty() &&
+            !MsgParser::isDeviceBusy() &&
+            !MsgParser::isRxBusy()) {
+
+            //добавлено !MsgParser::isDeviceBusy()
+
+            // === НОВОЕ: проверяем защитный интервал перед отправкой из очереди ===
+            auto sinceRx = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               currentTime - this->lastReceiveTime).count();
+            if (sinceRx >= POST_RX_GUARD_MS) {
+                MsgParser::PuhegUpperMessage nextMsg = this->messageBuffer.front();
+                this->messageBuffer.pop();
+                sendMessage(&nextMsg, false);
+            }
+            // Если интервал ещё не прошёл — пакет останется в очереди до след. цикла
+
+            //MsgParser::PuhegUpperMessage nextMsg = this->messageBuffer.front();
+            //this->messageBuffer.pop();
+            //sendMessage(&nextMsg, false);
         }
     }
 
@@ -171,6 +208,7 @@ void WSclient::processTimers() {
     if (passedTimeoutMs >= 500) {
         lastTimeoutCheck = currentTime;
         MsgParser::checkProcessTimeout();
+        MsgParser::checkRxTimeout();
     }
 }
 
@@ -204,11 +242,27 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
 
     if (!client) return 0;
 
+
+    //MsgParser::PuhegUpperMessage pumsg;
+    //WSclient wsc;
+    MsgParser msgp;
+    MsgParser::PuhegUpperMessage pumsg;
+
     switch (reason) {
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
         Log::info("Wsclient", "Подключение установлено");
         client->wsi = wsi;
         client->isLineBusy = false;
+
+        //когда появилось соединение, сразу инициализироваться
+        // Используем parser из client, а не локальный объект
+
+        pumsg.what = "initclient";
+        msgp.packMessage(&pumsg);
+
+        // Отправляем через client (у него есть wsi), а не через пустой wsc
+        client->sendMessage(&pumsg, false);
+
         break;
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -225,6 +279,9 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
 
     case LWS_CALLBACK_CLIENT_RECEIVE:
         if (len == 0 || in == nullptr) break;
+
+        // Фиксируем время приёма для защитного интервала
+        client->lastReceiveTime = std::chrono::steady_clock::now();
 
         if (len == 1 && *(char*)in == 'S') {
             client->successReceived();

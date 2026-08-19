@@ -164,6 +164,14 @@ void TunInterface::readerThread(WSclient* client) {
     std::vector<uint8_t> packet;
 
     while (running_ && client->running) {
+
+        // Не читаем TUN, пока станция принимает или идёт наша транзакция:
+        // пакеты ОС пусть копятся в ядерной очереди (естественный flow control)
+        if (MsgParser::isRxBusy() || MsgParser::isDeviceBusy()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
         if (readPacket(packet)) {
             processPacket(packet, client);
         }

@@ -139,8 +139,20 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
         // Ищем downlink
         auto thisIsDownlink = transport_map.find("downlink");
         if (thisIsDownlink != transport_map.end() && thisIsDownlink->second.type == msgpack::type::MAP) {
+
+            // === НОВОЕ: страж входящей передачи (только downlink!) ===
+            //Это про блокировку при входящем транспорте
+            std::string tr_state = transport_map.count("state")
+                                       ? transport_map["state"].as<std::string>() : "";
+            uint32_t tr_id = transport_map.count("id")
+                                 ? static_cast<uint32_t>(transport_map["id"].as<uint64_t>()) : 0;
+            MsgParser::watchTransport(tr_state, tr_id);
+            // === конец нового ===
+
             std::map<std::string, msgpack::object> downlink_map;
             thisIsDownlink->second.convert(downlink_map);
+
+
 
             // Ищем packet
             auto thisIsPacket = downlink_map.find("packet");
@@ -294,37 +306,7 @@ void MsgParser::startProcess(uint32_t threadId) {
     //Log::info("Process", "Новый процесс ", threadId, " зарегистрирован как активный.");
 }
 
-/*
-void MsgParser::watchProcess(const std::string& state, const std::string& thread) {
-    if (!runningProc.running) {
-        return; // Ничего не отслеживаем, выходим
-    }
 
-    // Преобразуем числовой ID в строку для безопасного сравнения
-    std::string trackedThreadStr = std::to_string(runningProc.thread);
-
-
-
-    if (trackedThreadStr == thread) {
-
-        Log::info("Msgparser", "Process ", runningProc.thread, ": ", state);
-
-        //if (state == "WORK") {
-            //std::cout << "[Process] Процесс '" << thread << "' выполняется (WORK)..." << std::endl;
-
-        //}
-        if (state == "OK") {
-            //std::cout << "[Process] >>> Процесс '" << thread << "' успешно завершен (OK)! <<<" << std::endl;
-            Log::info("Msgparser", "Процесс успешно завершен");
-            runningProc.running = false; // Освобождаем устройство
-        }
-        else if (state == "FAIL") {
-            //std::cerr << "[Process] !!! Процесс '" << thread << "' завершился с ошибкой (FAIL)! <<<" << std::endl;
-            Log::info("Msgparser", "Процесс провален");
-            runningProc.running = false; // Освобождаем устройство даже при ошибке, чтобы избежать deadlock
-        }
-    }
-}*/
 
 void MsgParser::watchProcess(const std::string& state, const std::string& threadId) {
     if (!runningProc.running) return;
@@ -370,5 +352,39 @@ void MsgParser::checkProcessTimeout() {
             Log::error("Process", "Таймаут завершения (5000 мс) для процесса ", runningProc.thread);
             runningProc.running = false;
         }
+    }
+}
+
+MsgParser::RxTransaction rxTransaction;
+
+bool MsgParser::isRxBusy() {
+    return rxTransaction.active;
+}
+
+void MsgParser::watchTransport(const std::string& state, uint32_t id) {
+    if (state == "WORK") {
+        if (!rxTransaction.active) {
+            Log::info("Process", "📥 Входящая транзакция ", id, " началась. TX заблокирован.");
+        }
+        rxTransaction.active = true;
+        rxTransaction.id = id;
+        rxTransaction.lastMsgTime = std::chrono::steady_clock::now();
+    } else if (state == "OK" || state == "FAIL") {
+        if (rxTransaction.active) {
+            Log::info("Process", "📥 Входящая транзакция ", id, " завершена (", state, "). TX разблокирован.");
+        }
+        rxTransaction.active = false;
+    }
+}
+
+void MsgParser::checkRxTimeout() {
+    if (!rxTransaction.active) return;
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - rxTransaction.lastMsgTime).count();
+    if (elapsed >= RX_TIMEOUT_MS) {
+        Log::error("Process", "Входящая транзакция ", rxTransaction.id,
+                   " затихла на ", elapsed, " мс. Принудительная разблокировка.");
+        rxTransaction.active = false;
     }
 }
