@@ -22,6 +22,11 @@ public:
         print(std::forward<Args>(args)...);
     }
 
+    template<typename... Args>
+    static void warn(Args&&... args) {
+        print(std::forward<Args>(args)...);
+    }
+
     // Шаблон для ERROR: принимает тег и любое количество аргументов
     template<typename... Args>
     static void error(Args&&... args) {

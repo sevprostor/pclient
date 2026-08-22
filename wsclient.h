@@ -8,6 +8,19 @@
 
 class WSclient {
 public:
+
+    //Это все про проверку подключения вебсокета
+    std::atomic<bool> sessionAlive{false};
+    std::chrono::steady_clock::time_point lastPongTime;   // единственный счётчик жизни
+    std::chrono::steady_clock::time_point lastPingCheck;
+    static constexpr int PING_INTERVAL_MS   = 3000;
+    static constexpr int KEEPALIVE_TIMEOUT_MS = 10000;
+    static constexpr int PASSED_TIMEOUT_MS   = 500;
+    static constexpr int PASSED_RESEND_MS   = 2000;
+    static constexpr int POST_RX_GUARD_MS = 2000; // Защитный интервал после приёма (мс), раньше не отправляем
+
+    bool isConnected() const { return wsi != nullptr; }
+
     void initContext();
     bool connectWS(const std::string& wsAddr); // <-- Изменили на const ссылку
 
@@ -40,8 +53,7 @@ private:
     // Время последнего получения сообщения от станции
     std::chrono::steady_clock::time_point lastReceiveTime;
 
-    // Защитный интервал после приёма (мс), раньше не отправляем
-    static constexpr int POST_RX_GUARD_MS = 500;
+
 
     void sendSuccess(struct lws *wsiParam);
     void successReceived();

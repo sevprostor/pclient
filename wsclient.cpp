@@ -26,6 +26,11 @@ void WSclient::initContext() {
 
     // Ставим "давно", чтобы первый пакет не блокировался
     this->lastReceiveTime = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+
+    //пинги
+    this->sessionAlive = false;
+    //this->lastPongTime  = std::chrono::steady_clock::now();
+    this->lastPingCheck = std::chrono::steady_clock::now();
 }
 
 // 2. Подключение к WS (ИСПРАВЛЕНО: используем this->lws_ctx_)
@@ -157,10 +162,30 @@ void WSclient::sendMessage(MsgParser::PuhegUpperMessage *pumsg, bool forceSend) 
 void WSclient::processTimers() {
     auto currentTime = std::chrono::steady_clock::now();
 
+    // === KEEPALIVE ===
+    if (this->sessionAlive && this->wsi != nullptr) {
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                currentTime - this->lastPingCheck).count() >= PING_INTERVAL_MS) {
+            this->lastPingCheck = currentTime;
+            unsigned char pingBuf[LWS_PRE];
+            lws_write(this->wsi, &pingBuf[LWS_PRE], 0, LWS_WRITE_PING);
+        }
+
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                currentTime - this->lastPongTime).count() >= KEEPALIVE_TIMEOUT_MS) {
+            Log::warn("Wsclient", "Нет PONG > ", KEEPALIVE_TIMEOUT_MS, " мс. Разрыв сессии.");
+            this->sessionAlive = false;
+            this->wsi = nullptr;
+            this->isLineBusy = false;
+            return;
+        }
+    }
+    // === конец keepalive ===
+
     auto passedBufferMs = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - this->lastBufferCheck).count();
 
     //проверка буфера неотправленных сообщений
-    if (passedBufferMs >= 500) { //было 500
+    if (passedBufferMs >= 1000) { //было 500
         this->lastBufferCheck = currentTime;
 
         if (!this->isLineBusy &&
@@ -188,7 +213,7 @@ void WSclient::processTimers() {
     }
 
     auto passedResendMs = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - this->lastResendCheck).count();
-    if (passedResendMs >= 1000) {
+    if (passedResendMs >= PASSED_RESEND_MS) {
         this->lastResendCheck = currentTime;
         if (this->isLineBusy && this->wsi != nullptr && this->sentMessage.id != 0) {
             if (this->resendTries < 3) {
@@ -205,7 +230,7 @@ void WSclient::processTimers() {
 
     static std::chrono::steady_clock::time_point lastTimeoutCheck = std::chrono::steady_clock::now();
     auto passedTimeoutMs = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastTimeoutCheck).count();
-    if (passedTimeoutMs >= 500) {
+    if (passedTimeoutMs >= PASSED_TIMEOUT_MS) {
         lastTimeoutCheck = currentTime;
         MsgParser::checkProcessTimeout();
         MsgParser::checkRxTimeout();
@@ -234,6 +259,8 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
                                  void *user, void *in, size_t len) {
     // Получаем указатель на наш объект из параметра user (мы передали его в info.user = this)
     //WSclient* client = static_cast<WSclient*>(user);
+
+
     WSclient* client = static_cast<WSclient*>(lws_wsi_user(wsi));
     if (!client) {
         // Fallback: пробуем получить из контекста
@@ -242,37 +269,45 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
 
     if (!client) return 0;
 
-
-    //MsgParser::PuhegUpperMessage pumsg;
-    //WSclient wsc;
+    static bool initialized = false;
     MsgParser msgp;
     MsgParser::PuhegUpperMessage pumsg;
 
     switch (reason) {
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
         Log::info("Wsclient", "Подключение установлено");
+
+        client->sessionAlive = true;
+        client->lastPongTime = std::chrono::steady_clock::now();
+
         client->wsi = wsi;
         client->isLineBusy = false;
 
-        //когда появилось соединение, сразу инициализироваться
-        // Используем parser из client, а не локальный объект
+        //когда впервые появилось соединение, сразу инициализироваться
+        if(!initialized){
 
-        pumsg.what = "initclient";
-        msgp.packMessage(&pumsg);
+            pumsg.what = "initclient";
+            msgp.packMessage(&pumsg);
+            // Отправляем через client (у него есть wsi)
+            client->sendMessage(&pumsg, false);
+            initialized = true;
 
-        // Отправляем через client (у него есть wsi), а не через пустой wsc
-        client->sendMessage(&pumsg, false);
+        }
 
         break;
 
     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
         Log::error("Wsclient", "Ошибка подключения");
+
+        client->sessionAlive = false;
         client->wsi = nullptr;
         client->isLineBusy = false;
         break;
 
     case LWS_CALLBACK_CLIENT_CLOSED:
         Log::info("Wsclient", "Соединение закрыто");
+
+        client->sessionAlive = false;
         client->wsi = nullptr;
         client->isLineBusy = false;
         break;
@@ -316,6 +351,11 @@ int WSclient::callbackQos2Client(struct lws *wsi, enum lws_callback_reasons reas
         break;
 
     case LWS_CALLBACK_CLIENT_WRITEABLE:
+        break;
+
+    case LWS_CALLBACK_CLIENT_RECEIVE_PONG:
+        // PONG — признак жизни, но НЕ данные: lastReceiveTime не трогаем!
+        client->lastPongTime = std::chrono::steady_clock::now();
         break;
 
     default:

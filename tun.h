@@ -12,12 +12,14 @@ public:
     TunInterface();
     ~TunInterface();
 
+    bool isInitialized() const { return fd_ >= 0; }
+    bool isOpen() const { return fd_ >= 0; }
+
     bool open(const std::string& ifname);
     void close();
     bool readPacket(std::vector<uint8_t>& packet);
     bool writePacket(const uint8_t* data, size_t len);
     int getFd() const { return fd_; }
-    bool isOpen() const { return fd_ >= 0; }
     std::string getIfname() const { return ifname_; }
 
     bool init(uint32_t ip, const std::string& ifname = "tun0",
