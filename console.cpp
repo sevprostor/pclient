@@ -12,7 +12,7 @@ extern Config config;
 extern Addressbook::Contact myProfile; // Убедитесь, что это объявлено в addressbook.h!
 
 MsgParser parser;
-extern WSclient wsclient;
+extern TCPclient wsclient;
 
 // Глобальные переменные для "умной" консоли
 std::mutex consoleMutex;
@@ -79,7 +79,7 @@ std::string Console::readLineWithRedraw() {
 }
 
 // Поток интерактивного ввода
-void Console::consoleInputThread(WSclient* client) {
+void Console::consoleInputThread(TCPclient* client) {
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
 

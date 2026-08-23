@@ -1,5 +1,6 @@
 #include "tun.h"
-#include "wsclient.h"
+//#include "TCPclient.h"
+#include "TCPclient.h"
 #include "msgparser.h"
 #include "log.h"
 #include "addressbook.h"
@@ -131,7 +132,7 @@ bool TunInterface::init(uint32_t ip, const std::string& ifname,
     return false;
 }
 
-void TunInterface::start(WSclient* client) {
+void TunInterface::start(TCPclient* client) {
     if (!isOpen()) {
         Log::info("TUN", "Невозможно запустить: интерфейс не открыт");
         return;
@@ -158,7 +159,7 @@ void TunInterface::stop() {
     }
 }
 
-void TunInterface::readerThread(WSclient* client) {
+void TunInterface::readerThread(TCPclient* client) {
     Log::info("TUN", "Поток чтения TUN запущен.");
 
     std::vector<uint8_t> packet;
@@ -180,7 +181,7 @@ void TunInterface::readerThread(WSclient* client) {
     Log::info("TUN", "Поток чтения TUN завершен.");
 }
 
-void TunInterface::processPacket(const std::vector<uint8_t>& packet, WSclient* client) {
+void TunInterface::processPacket(const std::vector<uint8_t>& packet, TCPclient* client) {
     if (packet.size() < 20) return;
 
     // ФИЛЬТР 1: только IPv4

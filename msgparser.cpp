@@ -224,21 +224,14 @@ void MsgParser::packMessage(PuhegUpperMessage *pumsg) {
     pumsg->id = std::rand() % 10000000;
     pumsg->thread = std::rand() % 10000000;
 
-    // 2. Сериализуем структуру напрямую в msgpack-буфер
     msgpack::sbuffer sbuf;
     msgpack::pack(sbuf, *pumsg);
 
-    // 3. Выделяем память в целевом векторе: отступ LWS_PRE + размер полезных данных msgpack
-    pumsg->packedMsg.resize(LWS_PRE + sbuf.size());
+    // БЕЗ LWS_PRE
+    pumsg->packedMsg.resize(sbuf.size());
+    std::memcpy(pumsg->packedMsg.data(), sbuf.data(), sbuf.size());
 
-    // 4. Копируем данные со смещением LWS_PRE
-    // sbuf.data() и sbuf.size() дают прямой доступ к упакованным байтам
-    std::memcpy(pumsg->packedMsg.data() + LWS_PRE, sbuf.data(), sbuf.size());
-
-    // 5. ВЫВОД СФОРМИРОВАННОГО JSON НА ЭКРАН (для отладки)
-    // Распаковываем только что созданный буфер, чтобы красиво вывести его в консоль
     msgpack::object_handle oh = msgpack::unpack(sbuf.data(), sbuf.size());
-    //std::cout << "[MsgParser] Исходящее сообщение: " << oh.get() << std::endl;
     Log::info("Msgparser", TAG_OUT, oh.get());
 }
 

@@ -13,9 +13,9 @@
 #include <msgpack.hpp>
 
 // libwebsockets остается Си-библиотекой
-extern "C" {
-#include <libwebsockets.h>
-}
+//extern "C" {
+//#include <libwebsockets.h>
+//}
 
 class MsgParser {
 public:

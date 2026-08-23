@@ -18,7 +18,8 @@ void Addressbook::setMyProfile(uint16_t id, const Contact& profile) {
     //std::cout << "[Addressbook] Успешно сохранен собственный профиль. Мой ID: "
     //          << my_id << ", Публичный ключ: " << myProfile.key << std::endl;
 
-    Log::info("Addressbook", "\n===Local profile===\nMAC:", myProfile.id, ", IP:", myProfile.ipString(), "\nListen spd:", static_cast<int>(myProfile.netsp), ", Listen channel:", static_cast<int>(myProfile.chanComm));
+    Log::info("Addressbook", "Local profile");
+    Log::info("Addressbook", "MAC:", myProfile.id, ", IP:", myProfile.ipString(), "Listen spd:", static_cast<int>(myProfile.netsp), ", Listen channel:", static_cast<int>(myProfile.chanComm));
 
     // ТРИГГЕР: Уведомляем систему, что профиль готов и можно настраивать сеть
     if (onProfileReadyCallback) {
@@ -69,14 +70,13 @@ bool Addressbook::getContact(uint16_t id, Contact& out_contact) const {
 void Addressbook::print() const {
     std::shared_lock lock(ab_mutex);
 
-    Log::info("Addressbook", "\n===Loaded total ", contacts.size(), " contacts===\n");
+    Log::info("Addressbook", "Loaded total ", contacts.size(), " contacts");
 
     for (const auto& [id, c] : contacts) {
-        std::cout << id << "(" << c.ipString() << "), Канал (chanComm): " << static_cast<int>(c.chanComm)
-                  << ", Скорость (netsp): " << static_cast<int>(c.netsp);
+        Log::info("Addressbook", id, "(", c.ipString(),"), chanComm:", static_cast<int>(c.chanComm), ", netsp:", static_cast<int>(c.netsp));
 
-        if (!c.name.empty()) std::cout << ", Имя/Лейбл: \"" << c.name << "\"";
-        std::cout << std::endl;
+        //if (!c.name.empty()) std::cout << ", Имя/Лейбл: \"" << c.name << "\"";
+        //std::cout << std::endl;
     }
     std::cout << std::endl << std::endl;
 }

@@ -5,7 +5,8 @@
 #include <thread>
 #include <atomic>
 
-class WSclient;
+//class WSclient;
+class TCPclient;
 
 class TunInterface {
 public:
@@ -25,7 +26,8 @@ public:
     bool init(uint32_t ip, const std::string& ifname = "tun0",
               int netmask = 24, int mtu = 1400);
 
-    void start(WSclient* client);
+    //void start(WSclient* client);
+    void start(TCPclient* client);
     void stop();
 
     static std::string ipToString(uint32_t ip);
@@ -36,9 +38,11 @@ private:
     std::thread readerThread_;
     std::atomic<bool> running_{false};
 
-    void readerThread(WSclient* client);  // <-- private метод
+    //void readerThread(WSclient* client);  // <-- private метод
+    void readerThread(TCPclient* client);
+
     //void processPacket(const std::vector<uint8_t>& packet);
-    void processPacket(const std::vector<uint8_t>& packet, WSclient* client); // <-- + client
+    void processPacket(const std::vector<uint8_t>& packet, TCPclient* client); // <-- + client
 
 
     bool findByIp(uint32_t targetIp);

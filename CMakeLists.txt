@@ -7,13 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 1. Поиск libwebsockets через PkgConfig (работает стабильно)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LWS REQUIRED libwebsockets)
+# pkg_check_modules(LWS REQUIRED libwebsockets)
 
 # 2. НОВЫЙ СПОСОБ: Ищем MsgPack стандартным методом CMake для C++
 find_package(msgpack REQUIRED)
 
 add_executable(pclient main.cpp wsclient.h
-    wsclient.cpp
+    # wsclient.cpp
     msgparser.h
     msgparser.cpp
     addressbook.h
@@ -30,20 +30,24 @@ add_executable(pclient main.cpp wsclient.h
     config.h
     config.cpp
     pclient.conf
+    TCPclient.h
+    TCPclient.cpp
+    mdns_discovery.h
+    mdns_discovery.cpp
 
 )
 
 # Указываем папки с заголовочными файлами (.h)
 # Для msgpack теперь используем современную переменную msgpack_INCLUDE_DIRS или её Си-аналог
 target_include_directories(pclient PRIVATE
-    ${LWS_INCLUDE_DIRS}
+    # ${LWS_INCLUDE_DIRS}
     ${msgpack_INCLUDE_DIRS}
 )
 
 # Линкуем библиотеки
 # msgpack автоматически предоставляет готовый таргет (цель) msgpackc или msgpackc-cxx
 target_link_libraries(pclient PRIVATE
-    ${LWS_LIBRARIES}
+    # ${LWS_LIBRARIES}
     msgpackc
 )
 

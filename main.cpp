@@ -1,25 +1,28 @@
-#include "wsclient.h"
+//#include "wsclient.h"
+#include "TCPclient.h"
 #include "msgparser.h"
 #include "addressbook.h"
 #include "console.h"
 #include "tun.h"
 #include "log.h"
 #include "config.h"
+#include "mdns_discovery.h"
 
 #include <iostream>
 #include <thread>
 #include <chrono>
 
-WSclient wsclient;
+//WSclient wsclient;
+TCPclient wsclient;
 Console console;
 TunInterface tun;
-//MsgParser parser;
+//MsgParser msgprs;
 Config config;
 
 //std::string g_serverAddr = "unknown";
 //std::string g_tunName = "tun0"; // Имя TUN-интерфейса по умолчанию
 
-void timerThread(WSclient* client) {
+void timerThread(TCPclient* client) {
     while (client->running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         client->processTimers();
@@ -45,6 +48,7 @@ int main(int argc, char **argv) {
     //wsclient.initContext();
     //wsclient.connectWS(g_serverAddr);
     //wsclient.connectWS(config.ws_address);
+
 
 
     // РЕГИСТРАЦИЯ КОЛЛБЕКА (без аргументов)
@@ -75,53 +79,66 @@ int main(int argc, char **argv) {
 
     std::cout << "[System] TCP/IP Клиент запущен. Вход в сетевой цикл..." << std::endl;
 
-    // 3. Главный цикл (теперь работает корректно!)
-    //while (wsclient.running) {
-    //    wsclient.service(50);
-    //}
+    //Поиск других станций в локалке, если есть
+    //Перенести в класс
+    auto nodes = discoverPuhegNodes(3000);
+    if (nodes.empty()) {
+        Log::warn("MDNS", "В сети не найдено узлов puheg");
+    } else {
+        Log::info("MDNS", "===============================");
+        Log::info("MDNS", "Puheg станции в локальной сети:");
+        for (const auto& n : nodes) {
+            Log::info("MDNS", "Имя: ", n.instance, " -> ", n.ip, ":", n.port);
+        }
+        Log::info("MDNS", "===============================");
+    }
+
 
     // === ГЛАВНЫЙ ЦИКЛ С РЕКОННЕКТОМ ===
+
+    static bool initialized = false;
+
     while (wsclient.running) {
-        // 1. Инициализация (как в оригинале)
         wsclient.initContext();
 
-        // 2. Подключение (как в оригинале)
-        if (!wsclient.connectWS(config.ws_address)) {
-            Log::info("Wsclient", "Не удалось создать контекст, повтор через 2 с...");
+        if (!wsclient.connectTCP(config.ws_address)) {
+
+            Log::warn("TCPclient", "Не удалось подключиться, повтор через 5 с...");
             wsclient.destroyContext();
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            std::this_thread::sleep_for(std::chrono::seconds(5));
             continue;
+
+        } else if(!initialized){
+
+            //При первом подключении инициализировать клиент
+            MsgParser mParser;
+            MsgParser::PuhegUpperMessage pumsg;
+            pumsg.what = "initclient";
+            mParser.packMessage(&pumsg);
+            wsclient.sendMessage(&pumsg);
+            initialized = true;
         }
 
-        // 3. Ожидание установления соединения (до 15 секунд)
         int waitAttempts = 0;
         while (wsclient.running && !wsclient.sessionAlive && waitAttempts < 300) {
-        //while (wsclient.running && !wsclient.sessionAlive) {
             wsclient.service(50);
             waitAttempts++;
         }
 
-        if (!wsclient.running) break;
-
         if (!wsclient.sessionAlive) {
-            Log::info("Wsclient", "Таймаут подключения (5 с), реконнект...");
+            Log::warn("TCPclient", "Таймаут подключения");
             wsclient.destroyContext();
-            std::this_thread::sleep_for(std::chrono::seconds(5));
             continue;
         }
 
-        Log::info("Main", "Соединение установлено, работаем.");
-
-        // 4. Рабочий цикл (как в оригинале) — пока сессия жива
         while (wsclient.running && wsclient.sessionAlive) {
             wsclient.service(50);
         }
 
-        // 5. Соединение потеряно — cleanup и пауза
         if (wsclient.running) {
-            Log::info("Wsclient", "Соединение потеряно, реконнект через 1 с...");
+            Log::warn("TCPclient", "Соединение потеряно, реконнект через 5 с...");
             wsclient.destroyContext();
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     }
 

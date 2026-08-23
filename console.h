@@ -2,7 +2,8 @@
 #define CONSOLE_H
 
 #pragma once
-#include "wsclient.h"
+//#include "wsclient.h"
+#include "TCPclient.h"
 #include "config.h"
 #include <string>
 #include <mutex>
@@ -17,7 +18,7 @@ public:
     static void redrawPrompt();
 
     //обрабатывать ввод
-    void consoleInputThread(WSclient* client);
+    void consoleInputThread(TCPclient* client);
     std::string readLineWithRedraw();
 
 
