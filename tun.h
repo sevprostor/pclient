@@ -13,6 +13,8 @@ public:
     TunInterface();
     ~TunInterface();
 
+    const uint32_t BROADCAST_IP = 0x0A00FFFF;  // 10.0.255.255 в сетевом порядке байт
+
     bool isInitialized() const { return fd_ >= 0; }
     bool isOpen() const { return fd_ >= 0; }
 

@@ -16,12 +16,16 @@ class Addressbook {
 private:
     Addressbook() = default;
 
+
+
     uint16_t my_id = 0;
     mutable std::shared_mutex ab_mutex;
 
     static std::function<void()> onProfileReadyCallback;
 
 public:
+
+    std::shared_mutex& getMutex() { return ab_mutex; }
     /*
     struct Contact {
         uint16_t id = 0;

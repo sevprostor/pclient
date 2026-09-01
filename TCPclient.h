@@ -34,6 +34,7 @@ public:
 
     void sendMessage(MsgParser::PuhegUpperMessage* pumsg, bool forceSend = false);
     void processTimers();
+    void sendTimeSync();
 
     int running = 1;
 

@@ -12,7 +12,7 @@ find_package(PkgConfig REQUIRED)
 # 2. НОВЫЙ СПОСОБ: Ищем MsgPack стандартным методом CMake для C++
 find_package(msgpack REQUIRED)
 
-add_executable(pclient main.cpp wsclient.h
+add_executable(pclient main.cpp
     # wsclient.cpp
     msgparser.h
     msgparser.cpp
@@ -34,6 +34,10 @@ add_executable(pclient main.cpp wsclient.h
     TCPclient.cpp
     mdns_discovery.h
     mdns_discovery.cpp
+    commander.h
+    commander.cpp
+    eventbus.h
+    eventbus.cpp
 
 )
 

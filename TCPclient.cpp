@@ -1,5 +1,7 @@
 #include "TCPclient.h"
 #include "log.h"
+#include "eventbus.h"
+
 #include <cstring>
 #include <iostream>
 #include <sys/socket.h>
@@ -8,6 +10,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <netinet/tcp.h>
+#include <ctime>
+#include <cstdio>
 
 void TCPclient::initContext() {
     this->socketFd_ = -1;
@@ -121,9 +125,12 @@ bool TCPclient::connectTCP(const std::string& address) {
     this->sessionAlive = true;
     this->lastPongTime = std::chrono::steady_clock::now();
     Log::info("TCPclient", "Подключено к ", address, ":", port);
+    EventBus::emit("link_up", "\"peer\":\"" + address + "\""); //Сообщить об этом в шину
 
     if (readerThread_.joinable()) readerThread_.join();
     readerThread_ = std::thread(&TCPclient::readerLoop, this);
+
+
 
     return true;
 }
@@ -218,25 +225,22 @@ void TCPclient::readerLoop() {
                 readBuffer.erase(readBuffer.begin(), readBuffer.begin() + expectedLen);
                 expectedLen = 0;
 
-                /*if (frame.size() == 1 && frame[0] == 'S') {
-                    // подтверждение доставки
-                    successReceived();
+                if (frame.size() == 1 && frame[0] == 'X') {
+                    // Станция перенастраивается или ведет приемопередачу
+                    // с этим надо чтото сделать
+                    this->messageBuffer.push(this->sentMessage);
+                    Log::error("TCPclient", "Станция занята, сообщение добавлено в очередь");
+                    EventBus::emit("radio_busy");
 
-                } else */
+                } else
+
                 if (frame.size() == 1 && frame[0] == 'P') {
                     // pong от станции: признак жизни, НЕ данные
                     this->lastPongTime = std::chrono::steady_clock::now();
 
                 } else {
                     // боевые данные
-                    //if (this->isLineBusy) {
-                        //this->isLineBusy = false;
-                        //this->sentMessage = MsgParser::PuhegUpperMessage();
-                        //this->resendTries = 0;
-                        //Log::info("TCPclient", "Получены данные. Линия свободна.");
-                    //}
 
-                    //sendSuccess();
 
                     try {
                         msgpack::object_handle oh = msgpack::unpack(
@@ -406,6 +410,7 @@ void TCPclient::processTimers() {
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
                 currentTime - this->lastPongTime).count() >= KEEPALIVE_TIMEOUT_MS) {
             Log::warn("TCPclient", "Нет ответа > ", KEEPALIVE_TIMEOUT_MS, " мс. Разрыв.");
+            EventBus::emit("link_down", "\"reason\":\"keepalive\"");
             this->sessionAlive = false;
             std::lock_guard<std::mutex> lock(socketMutex_);
             if (socketFd_ >= 0) {
@@ -481,4 +486,27 @@ int64_t TCPclient::extractNnc(const msgpack::object& obj) {
         }
     }
     return -1;
+}
+
+// шлём станции текущее время в человекопонятном формате
+void TCPclient::sendTimeSync() {
+    char buf[32];
+    time_t now = time(nullptr);
+    struct tm t;
+    gmtime_r(&now, &t);                       // UTC, как и вся ваша шкала
+
+    // "2026-08-24-14-35-10"
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d-%02d-%02d-%02d",
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+             t.tm_hour, t.tm_min, t.tm_sec);
+
+    MsgParser::PuhegUpperMessage pumsg;
+    pumsg.what = "set";
+    pumsg.todo = "clock";
+    pumsg.msg.assign(buf, buf + strlen(buf));
+
+    parser.packMessage(&pumsg);
+    sendMessage(&pumsg, true);                // forceSend: соединение свежее,
+        // станция ещё не занята
+    Log::info("TCPclient", "Синхронизация времени: ", buf);
 }

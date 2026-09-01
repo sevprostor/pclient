@@ -7,6 +7,7 @@
 #include "log.h"
 #include "config.h"
 #include "mdns_discovery.h"
+#include "eventbus.h"
 
 #include <iostream>
 #include <thread>
@@ -93,6 +94,9 @@ int main(int argc, char **argv) {
         Log::info("MDNS", "===============================");
     }
 
+    //Шина событий/сообщений для внешних программ
+    EventBus::init(config.event_port);
+
 
     // === ГЛАВНЫЙ ЦИКЛ С РЕКОННЕКТОМ ===
 
@@ -110,12 +114,17 @@ int main(int argc, char **argv) {
 
         } else if(!initialized){
 
-            //При первом подключении инициализировать клиент
+            //При первом подключении синхронизировать время на станции и инициализировать клиент
+            wsclient.sendTimeSync();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             MsgParser mParser;
             MsgParser::PuhegUpperMessage pumsg;
             pumsg.what = "initclient";
             mParser.packMessage(&pumsg);
             wsclient.sendMessage(&pumsg);
+
+
+
             initialized = true;
         }
 

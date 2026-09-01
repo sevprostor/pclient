@@ -17,6 +17,9 @@ struct Config {
     int tun_netmask = 24;
     int tun_mtu = 1400;
 
+    //EventBus
+    int event_port = 9400;
+
     // Загрузка из файла
     bool loadFromFile(const std::string& filename);
 

@@ -2,6 +2,7 @@
 #include "addressbook.h" // Обязательный инклуд для работы с адресной книгой
 #include "log.h"
 #include "tun.h"
+#include "eventbus.h"
 
 #include <sstream>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 #include <string>
 
 #include "logcolors.h"
+#include "commander.h"
 
 extern TunInterface tun;
 
@@ -26,7 +28,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     Log::info("Msgparser", TAG_IN, obj);
 
     // =========================================================================
-    // БЛОК 1: ADDRESSBOOK (Аналог Python: if isinstance(adressbook, dict))
+    // БЛОК 1: ADDRESSBOOK
     // =========================================================================
     auto thisIsAddressbook = root_map.find("addressbook");
     //не понимаю, уточнить
@@ -103,7 +105,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     }
 
     // =========================================================================
-    // БЛОК 2: PROCESS (Аналог Python: if isinstance(proc, dict))
+    // БЛОК 2: PROCESS
     // =========================================================================
 
     auto thisIsProcess = root_map.find("process");
@@ -135,6 +137,12 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     if (thisIsTransport != root_map.end() && thisIsTransport->second.type == msgpack::type::MAP) {
         std::map<std::string, msgpack::object> transport_map;
         thisIsTransport->second.convert(transport_map);
+
+        //Ищем парент для отправки в watchProcess() чтобы не происходило
+        //сброса процесса раньше времени на долгих отправках.
+        //Это нужно сделать для всех типов сообщений.
+        std::string thread = transport_map.count("parent") ? transport_map["parent"].as<std::string>() : "";
+        watchProcess("WORK", thread);
 
         // Ищем downlink
         auto thisIsDownlink = transport_map.find("downlink");
@@ -171,9 +179,19 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
                     Log::info("MsgParser", "downlink.packet имеет неожиданный тип: ", (int)thisIsPacket->second.type);
                 }
 
+
+
                 // Записываем в TUN, если пакет не пустой
                 if (!packetBytes.empty()) {
                     Log::info("MsgParser", "📥 Принят пакет, ", packetBytes.size(), " байт");
+
+                    // перед записью в TUN:
+                    if (Commander::isCommand(packetBytes.data(), packetBytes.size())) {
+                        std::string body(reinterpret_cast<const char*>(packetBytes.data()) + Commander::PREFIX_LEN,
+                                         packetBytes.size() - Commander::PREFIX_LEN);
+                        Commander::handle(body, "radio");
+                        return;                              // в TUN не пишем
+                    }
 
                     if (tun.writePacket(packetBytes.data(), packetBytes.size())) {
                         Log::info("MsgParser", "Пакет передан в tun0");
@@ -249,7 +267,6 @@ void MsgParser::parseFlatCommand(const std::string& flat_line, PuhegUpperMessage
 
         // Если формат нарушен (нет хотя бы 3 точек), пакуем всю строку как ошибку в поле what
         if (p1 == std::string::npos || p2 == std::string::npos || p3 == std::string::npos) {
-            //std::cerr << "[Parser Error] Неверный формат! Ожидалось: what.todo.howmuch. msg" << std::endl;
             Log::error("Msgparser", "Неверный формат! Ожидалось: what.todo.howmuch. msg");
 
         } else {
@@ -314,10 +331,12 @@ void MsgParser::watchProcess(const std::string& state, const std::string& thread
         }
         else if (state == "OK") {
             Log::info("Process", ">>> Процесс '", threadId, "' успешно завершен (OK)! <<<");
+            EventBus::emit("toss_ok", "\"thread\":" + threadId + "\"");
             runningProc.running = false;
         }
         else if (state == "FAIL") {
             Log::error("Process", "!!! Процесс '", threadId, "' завершился с ошибкой (FAIL)! <<<");
+            EventBus::emit("toss_fail", "\"thread\":" + threadId + "\"");
             runningProc.running = false;
         }
     }

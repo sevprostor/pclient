@@ -4,6 +4,7 @@
 #include "msgparser.h"
 #include "log.h"
 #include "addressbook.h"
+#include "eventbus.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -181,6 +182,10 @@ void TunInterface::readerThread(TCPclient* client) {
     Log::info("TUN", "Поток чтения TUN завершен.");
 }
 
+
+
+//const uint32_t BROADCAST_IP = 0x0A00FFFF;  // 10.0.255.255 в сетевом порядке байт
+//перенесено в tun.h
 void TunInterface::processPacket(const std::vector<uint8_t>& packet, TCPclient* client) {
     if (packet.size() < 20) return;
 
@@ -188,26 +193,62 @@ void TunInterface::processPacket(const std::vector<uint8_t>& packet, TCPclient* 
     uint8_t version = packet[0] >> 4;
     if (version != 4) return;
 
-    // Вычисляем целевой MAC из IP назначения
+    // Извлекаем полный dst-IP (байты 16-19)
+    uint32_t dstIp = (packet[16] << 24) | (packet[17] << 16) | (packet[18] << 8) | packet[19];
+
+    // === ОБРАБОТКА БРОДКАСТА ===
+    if (dstIp == BROADCAST_IP) {
+        // Веер по всем контактам без фильтрации
+        std::shared_lock lock(Addressbook::getInstance().getMutex());
+        for (const auto& [destMac, contact] : contacts) {
+            // Создаём копию пакета и переписываем dst IP на личный IP контакта
+            std::vector<uint8_t> copy = packet;
+            uint32_t contactIp = contact.ipAddr();  // уже в сетевом порядке
+
+            // Переписываем байты 16-19 (dst IP)
+            copy[16] = (contactIp >> 24) & 0xFF;
+            copy[17] = (contactIp >> 16) & 0xFF;
+            copy[18] = (contactIp >> 8)  & 0xFF;
+            copy[19] =  contactIp        & 0xFF;
+
+            // Пересчитываем IP checksum (байты 10-11)
+            copy[10] = copy[11] = 0;
+            uint32_t sum = 0;
+            for (size_t i = 0; i < 20; i += 2)
+                sum += (copy[i] << 8) | copy[i + 1];
+            while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+            uint16_t c = ~sum & 0xFFFF;
+            copy[10] = (c >> 8) & 0xFF;
+            copy[11] =  c       & 0xFF;
+
+            // Отправляем через стандартный механизм
+            MsgParser::PuhegUpperMessage pumsg;
+            pumsg.what = "toss";
+            pumsg.todo = "";
+            pumsg.howmuch = destMac;
+            pumsg.msg.assign(copy.begin(), copy.end());
+            parser.packMessage(&pumsg);
+            client->sendMessage(&pumsg);
+        }
+        Log::info("TUN", "📡 Бродкаст: веер на ", contacts.size(), " контактов");
+        EventBus::emit("broadcast", "\"n\":" + std::to_string(contacts.size()) + "\"");
+        return;
+    }
+
+    // === ОБЫЧНАЯ ОТПРАВКА ОДНОМУ КОНТАКТУ ===
     uint16_t destMac = (packet[18] << 8) | packet[19];
 
-    // ФИЛЬТР 2: только известные узлы из адресной книги
     Addressbook::Contact target;
     if (!Addressbook::getInstance().getContact(destMac, target)) {
         return;
     }
 
-    // === ОБЕРТКА В СООБЩЕНИЕ ВЕРХНЕГО УРОВНЯ PUHEG ===
     MsgParser::PuhegUpperMessage pumsg;
-    pumsg.what = "toss";                 // команда передачи данных
+    pumsg.what = "toss";
     pumsg.todo = "";
-    pumsg.howmuch = destMac;             // целевой MAC
-    pumsg.msg.assign(packet.begin(), packet.end()); // сырой IP-пакет как полезная нагрузка
-
-    // Сериализуем в msgpack (id и thread проставятся внутри)
+    pumsg.howmuch = destMac;
+    pumsg.msg.assign(packet.begin(), packet.end());
     parser.packMessage(&pumsg);
-
-    // Отправляем через QoS2-механизм (очередь, ресенды)
     client->sendMessage(&pumsg);
 
     Log::info("TUN", "📦 IP-пакет ", packet.size(), " байт обернут в toss для MAC ", destMac);

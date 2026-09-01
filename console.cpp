@@ -4,6 +4,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include "config.h"
+#include "commander.h"
 
 // Объявляем внешние переменные
 //extern std::string g_serverAddr;
@@ -24,8 +25,7 @@ void Console::redrawPrompt() {
 
     const std::string sysPrompt = "\r\033[2K\033[1;32m" +
                                   config.ws_address + "@" + std::to_string(myProfile.id) +
-                                  + " (" + config.cmdMode + ") "
-                                  ">\033[0m ";
+                                  + ">\033[0m ";
 
     // Используем printf вместо std::cout для надежности в raw-режиме
     //printf("%s%s", getSystemPrompt().c_str(), g_currentInput.c_str());
@@ -66,8 +66,11 @@ std::string Console::readLineWithRedraw() {
             g_currentInput += c;
             redrawPrompt();
         }
+
+
         // Примечание: стрелки влево/вправо здесь не обрабатываются для простоты,
         // но базовый ввод и стирание работают идеально.
+
     }
 
     // Восстанавливаем нормальные настройки терминала
@@ -77,6 +80,8 @@ std::string Console::readLineWithRedraw() {
     g_currentInput.clear();
     return result;
 }
+
+
 
 // Поток интерактивного ввода
 void Console::consoleInputThread(TCPclient* client) {
@@ -95,21 +100,26 @@ void Console::consoleInputThread(TCPclient* client) {
         // Используем нашу новую функцию вместо std::getline
         std::string line = readLineWithRedraw();
 
+        if (Commander::isCommand(line)) {
+            Commander::handle(line.substr(Commander::PREFIX_LEN), "console");
+            continue;
+        }
+
         //Здесь делать парсер команд
         if (line == "exit" || line == "quit") {
             client->running = 0;
             break;
-        } else if (line == "drv"){
+        //} else if (line == "drv"){
 
             //переключиться в режим приема команд драйвера
-            config.cmdMode = "DRV";
-            line = "";
+            //config.cmdMode = "DRV";
+            //line = "";
 
-        } else if (line == "mac"){
+        //} else if (line == "mac"){
 
             //Переключиться на прием команд мак-уровня
-            config.cmdMode = "MAC";
-            line = "";
+            //config.cmdMode = "MAC";
+            //line = "";
 
         } else if (line == "help"){
 
@@ -130,7 +140,7 @@ void Console::consoleInputThread(TCPclient* client) {
 
         }
 
-        if (config.cmdMode == "MAC" && !line.empty()) {
+        if (!line.empty()) {
             MsgParser::PuhegUpperMessage pumsg; // Чистый экземпляр для каждой команды
             parser.parseFlatCommand(line, &pumsg);
             client->sendMessage(&pumsg);
