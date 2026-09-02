@@ -84,11 +84,13 @@ int main(int argc, char** argv) {
     }
 
     if (opts.verbose) {
+        //Вывести то, что свалилось в сокет для нас
         eventBus.setOnEvent([](const std::string& event) {
             printf("[EventBus] %s\n", event.c_str());
         });
     }
 
+    //в каком режиме работаем? Отправка или висеть на приеме
     if (opts.mode == "send") {
         if (!hauler.sendFile(opts.file, opts.dest)) {
             fprintf(stderr, "Ошибка передачи файла\n");

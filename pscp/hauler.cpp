@@ -44,6 +44,9 @@ void Hauler::recvFiles(const std::string& outDir) {
     printf("Приём файлов в директорию: %s\n", outDir.c_str());
     running_ = true;
 
+    //сперва подписаться в драйвере на транспортные сообщения
+
+
     transport_.setOnFrame([](const std::vector<uint8_t>& frame) {
         if (frame.size() >= 3 && frame[0] == 'F' && frame[1] == 'H' && frame[2] == '\x01') {
             printf("📥 Получен FH-фрейм (%zu байт)\n", frame.size());

@@ -6,6 +6,7 @@
 #include <sys/select.h>
 #include <cstdio>
 
+/*
 bool Transport::init(uint16_t driverPort) {
     driverPort_ = driverPort;
     sock_ = socket(AF_INET, SOCK_DGRAM, 0);
@@ -18,6 +19,39 @@ bool Transport::init(uint16_t driverPort) {
     if (bind(sock_, (sockaddr*)&addr, sizeof(addr)) < 0) return false;
 
     std::string sub = "{\"cmd\":\"subscribe\",\"events\":[\"transfer\"],\"port\":0}";
+    sockaddr_in bus{};
+    bus.sin_family = AF_INET;
+    bus.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bus.sin_port = htons(driverPort_);
+    sendto(sock_, sub.c_str(), sub.size(), 0, (sockaddr*)&bus, sizeof(bus));
+
+    return true;
+}*/
+
+//сюда надо передать конфиг
+bool Transport::init(uint16_t driverPort) {
+    driverPort_ = driverPort;
+    sock_ = socket(AF_INET, SOCK_DGRAM, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    // 1. МЫ ПРОСИМ ОС ВЫДАТЬ ЛЮБОЙ СВОБОДНЫЙ ПОРТ, указывая 0
+    addr.sin_port = 0;
+
+    // ОС выделяет порт (например, 45678) и привязывает его к нашему сокету
+    if (bind(sock_, (sockaddr*)&addr, sizeof(addr)) < 0) return false;
+
+    // 2. МЫ СПРАШИВАЕМ У ОС: "Какой порт ты мне дал?"
+    socklen_t len = sizeof(addr);
+    getsockname(sock_, (sockaddr*)&addr, &len);
+    uint16_t myLocalPort = ntohs(addr.sin_port); // <-- Вот наш порт для прослушивания!
+
+    // Отправляем JSON-подписку с РЕАЛЬНЫМ портом
+    std::string sub = "{\"cmd\":\"subscribe\",\"events\":[\"transfer\"],\"port\":" + std::to_string(myLocalPort) + "}";
+
+    // ... отправка этого JSON на driverPort (9400)
     sockaddr_in bus{};
     bus.sin_family = AF_INET;
     bus.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
