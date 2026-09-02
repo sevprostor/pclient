@@ -34,6 +34,7 @@ bool Config::loadFromFile(const std::string& filename) {
         else if (key == "tun_ip") tun_ip = value;
         else if (key == "tun_netmask") tun_netmask = std::stoi(value);
         else if (key == "tun_mtu") tun_mtu = std::stoi(value);
+        else if (key == "eventBusPort") eventBusPort = static_cast<uint16_t>(std::stoi(value));
     }
 
     file.close();
@@ -68,15 +69,9 @@ bool Config::parseCommandLine(int argc, char** argv) {
                 return false;
             }
         }
-        //else if (arg == "-ip") {
-        //    if (i + 1 < argc) {
-        //        tun_ip = argv[i + 1];
-        //        i++;
-        //    } else {
-        //        std::cerr << "Ошибка: -ip требует IP-адрес" << std::endl;
-        //        return false;
-        //    }
-        //}
+        else if (arg == "-eb" && i + 1 < argc) {
+            eventBusPort = static_cast<uint16_t>(std::stoi(argv[++i]));
+        }
         else if (arg == "-mask") {
             if (i + 1 < argc) {
                 tun_netmask = std::stoi(argv[i + 1]);
@@ -108,13 +103,15 @@ bool Config::parseCommandLine(int argc, char** argv) {
             std::cout << "Использование:\n"
                       << "  -ws <address>    Адрес WebSocket сервера (по умолчанию: puheg.local)\n"
                       << "  -tun <name>      Имя TUN интерфейса (по умолчанию: tun0)\n"
-                      //<< "  -ip <address>    IP-адрес TUN интерфейса (по умолчанию: 10.0.0.1)\n"
+                      << "  -eb <port>   EventBus UDP port (default: 9400)\n"
                       << "  -mask <number>   Маска сети (по умолчанию: 24)\n"
                       << "  -mtu <number>    MTU интерфейса (по умолчанию: 1400)\n"
                       << "  -config <file>   Загрузить настройки из файла\n"
                       << "  -help            Показать эту справку\n";
             return false;
         }
+
+
         else {
             std::cerr << "Неизвестный ключ: " << arg << std::endl;
             return false;
@@ -129,5 +126,6 @@ void Config::print() const {
               << "TUN интерфейс: " << tun_interface << "\n"
               << "TUN IP: " << tun_ip << "/" << tun_netmask << "\n"
               << "TUN MTU: " << tun_mtu << "\n"
+              << "EB PORT: " << eventBusPort << "\n"
               << "=========================\n" << std::endl;
 }

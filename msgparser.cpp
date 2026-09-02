@@ -189,7 +189,8 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
                     if (Commander::isCommand(packetBytes.data(), packetBytes.size())) {
                         std::string body(reinterpret_cast<const char*>(packetBytes.data()) + Commander::PREFIX_LEN,
                                          packetBytes.size() - Commander::PREFIX_LEN);
-                        Commander::handle(body, "radio");
+                        //Commander::handle(body, "radio");
+                        commander.handle(body, "radio");
                         return;                              // в TUN не пишем
                     }
 

@@ -16,7 +16,11 @@ public:
     static bool isCommand(const std::string& s);
 
     // входная точка: строка УЖЕ без префикса
-    static void handle(const std::string& body, const std::string& source);
+    void handle(const std::string& body, const std::string& source);
+
+    void tosser(const std::string& body);
 };
+
+extern Commander commander;
 
 #endif // COMMANDER_H

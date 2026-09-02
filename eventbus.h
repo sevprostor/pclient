@@ -8,6 +8,7 @@
 #include <thread>
 #include <atomic>
 #include <cstdint>
+#include "config.h"
 
 struct EventSubscriber {
     uint32_t ip;      // сетевой порядок
@@ -16,7 +17,7 @@ struct EventSubscriber {
 
 class EventBus {
 public:
-    static bool init(uint16_t port);       // сокет 127.0.0.1:port + поток чтения
+    static bool init(Config*);       // сокет 127.0.0.1:port + поток чтения
     static void stop();
 
     // толкнуть событие всем подписчикам; fields — готовые JSON-пары: "\"id\":5"
@@ -24,6 +25,8 @@ public:
 
     static void subscribe(uint32_t ip, uint16_t port);
     static void unsubscribe(uint32_t ip, uint16_t port);
+
+
 
 private:
     static void readerLoop();
@@ -33,6 +36,9 @@ private:
     static std::atomic<bool> running_;
     static std::vector<EventSubscriber> subs_;
     static std::mutex mtx_;
+
+    static EventSubscriber transferSub_;
+    static std::atomic<bool> transferSubActive_;
 };
 
 #endif // EVENTBUS_H

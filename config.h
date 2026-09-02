@@ -2,6 +2,7 @@
 #define CONFIG_H
 #pragma once
 #include <string>
+#include <cstdint>
 
 struct Config {
 
@@ -18,7 +19,7 @@ struct Config {
     int tun_mtu = 1400;
 
     //EventBus
-    int event_port = 9400;
+    int eventBusPort = 9400;
 
     // Загрузка из файла
     bool loadFromFile(const std::string& filename);
@@ -29,5 +30,7 @@ struct Config {
     // Вывод текущих настроек
     void print() const;
 };
+
+extern Config config;
 
 #endif // CONFIG_H

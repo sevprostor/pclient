@@ -67,4 +67,6 @@ private:
     int64_t extractNnc(const msgpack::object& obj);
 };
 
+extern TCPclient wsclient;
+
 #endif // TCPCLIENT_H

@@ -8,17 +8,19 @@
 #include "config.h"
 #include "mdns_discovery.h"
 #include "eventbus.h"
+#include "commander.h"
+
 
 #include <iostream>
 #include <thread>
 #include <chrono>
 
-//WSclient wsclient;
 TCPclient wsclient;
 Console console;
 TunInterface tun;
 //MsgParser msgprs;
 Config config;
+Commander commander;
 
 //std::string g_serverAddr = "unknown";
 //std::string g_tunName = "tun0"; // Имя TUN-интерфейса по умолчанию
@@ -95,7 +97,7 @@ int main(int argc, char **argv) {
     }
 
     //Шина событий/сообщений для внешних программ
-    EventBus::init(config.event_port);
+    EventBus::init(&config);
 
 
     // === ГЛАВНЫЙ ЦИКЛ С РЕКОННЕКТОМ ===
@@ -116,11 +118,12 @@ int main(int argc, char **argv) {
 
             //При первом подключении синхронизировать время на станции и инициализировать клиент
             wsclient.sendTimeSync();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            MsgParser mParser;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            //MsgParser mParser;
+
             MsgParser::PuhegUpperMessage pumsg;
             pumsg.what = "initclient";
-            mParser.packMessage(&pumsg);
+            parser.packMessage(&pumsg);
             wsclient.sendMessage(&pumsg);
 
 

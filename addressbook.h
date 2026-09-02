@@ -97,6 +97,9 @@ public:
     void clear();
     void print() const;
 
+    bool findContactByIp(const std::string& ipStr, Contact& out_contact) const;
+
+
     // Регистрация коллбека, который сработает при получении нашего профиля
     static void setOnProfileReadyCallback(std::function<void()> callback);
 

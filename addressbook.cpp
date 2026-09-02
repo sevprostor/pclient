@@ -67,6 +67,17 @@ bool Addressbook::getContact(uint16_t id, Contact& out_contact) const {
     return false;
 }
 
+bool Addressbook::findContactByIp(const std::string& ipStr, Contact& out_contact) const {
+    std::shared_lock lock(ab_mutex);
+    for (const auto& pair : contacts) {
+        if (pair.second.ipString() == ipStr) {
+            out_contact = pair.second;
+            return true;
+        }
+    }
+    return false;
+}
+
 void Addressbook::print() const {
     std::shared_lock lock(ab_mutex);
 

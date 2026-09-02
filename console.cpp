@@ -13,7 +13,7 @@ extern Config config;
 extern Addressbook::Contact myProfile; // Убедитесь, что это объявлено в addressbook.h!
 
 MsgParser parser;
-extern TCPclient wsclient;
+//extern TCPclient wsclient;
 
 // Глобальные переменные для "умной" консоли
 std::mutex consoleMutex;
@@ -101,7 +101,8 @@ void Console::consoleInputThread(TCPclient* client) {
         std::string line = readLineWithRedraw();
 
         if (Commander::isCommand(line)) {
-            Commander::handle(line.substr(Commander::PREFIX_LEN), "console");
+            //Commander::handle(line.substr(Commander::PREFIX_LEN), "console");
+            commander.handle(line.substr(Commander::PREFIX_LEN), "console");
             continue;
         }
 
