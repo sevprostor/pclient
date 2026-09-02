@@ -5,16 +5,18 @@
 #include <sys/select.h>
 #include <unistd.h>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 bool EventBusClient::start(uint16_t busPort) {
     sock_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_ < 0) return false;
 
-    sockaddr_in a{};
-    a.sin_family = AF_INET;
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    a.sin_port = 0;
-    if (bind(sock_, (sockaddr*)&a, sizeof(a)) < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    if (bind(sock_, (sockaddr*)&addr, sizeof(addr)) < 0) return false;
 
     sockaddr_in bus{};
     bus.sin_family = AF_INET;
@@ -24,7 +26,7 @@ bool EventBusClient::start(uint16_t busPort) {
         return false;
 
     running_ = true;
-    thr_ = std::thread([this]() {
+    thr_ = std::thread([this] {
         char buf[2048];
         while (running_) {
             fd_set rfds; FD_ZERO(&rfds); FD_SET(sock_, &rfds);
@@ -33,7 +35,7 @@ bool EventBusClient::start(uint16_t busPort) {
             ssize_t n = recvfrom(sock_, buf, sizeof(buf) - 1, 0, nullptr, nullptr);
             if (n <= 0) continue;
             buf[n] = '\0';
-            printf("[event] %s\n", buf);
+            if (onEvent_) onEvent_(std::string(buf));
         }
     });
     return true;
