@@ -182,18 +182,32 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
 
                 // Записываем в TUN, если пакет не пустой
+                // Записываем в TUN, если пакет не пустой
                 if (!packetBytes.empty()) {
                     Log::info("MsgParser", "📥 Принят пакет, ", packetBytes.size(), " байт");
 
-                    // перед записью в TUN:
+                    // 1. ПРОВЕРКА НА FILE HAULER PROTOCOL (FH\x01)
+                    if (packetBytes.size() >= 3 &&
+                        packetBytes[0] == 'F' && packetBytes[1] == 'H' && packetBytes[2] == '\x01') {
+
+                        if (EventBus::hasTransferSubscriber()) {
+                            EventBus::emitTransfer(packetBytes);
+                            Log::info("MsgParser", "📦 FH-фрейм перехвачен, отправлен в EventBus");
+                        } else {
+                            Log::warn("MsgParser", "📦 FH-фрейм получен, но подписчика нет. Дроп.");
+                        }
+                        return; // ВАЖНО: выходим, в TUN не пишем!
+                    }
+
+                    // 2. Проверка на текстовую команду драйвера (>>> ...)
                     if (Commander::isCommand(packetBytes.data(), packetBytes.size())) {
                         std::string body(reinterpret_cast<const char*>(packetBytes.data()) + Commander::PREFIX_LEN,
                                          packetBytes.size() - Commander::PREFIX_LEN);
-                        //Commander::handle(body, "radio");
                         commander.handle(body, "radio");
-                        return;                              // в TUN не пишем
+                        return; // В TUN не пишем!
                     }
 
+                    // 3. Обычный IP-пакет -> в TUN
                     if (tun.writePacket(packetBytes.data(), packetBytes.size())) {
                         Log::info("MsgParser", "Пакет передан в tun0");
                     } else {

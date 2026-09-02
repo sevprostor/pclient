@@ -26,7 +26,9 @@ public:
     static void subscribe(uint32_t ip, uint16_t port);
     static void unsubscribe(uint32_t ip, uint16_t port);
 
-
+    static void setTransferSubscriber(uint32_t ip, uint16_t port);
+    static void emitTransfer(const std::vector<uint8_t>& data);
+    static bool hasTransferSubscriber();
 
 private:
     static void readerLoop();
