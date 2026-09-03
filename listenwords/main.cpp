@@ -11,6 +11,14 @@ static void usage(const char* prog) {
     Log::info("ListenWords", "  ", prog, " [-eb port] [-config path]");
 }
 
+static std::vector<uint8_t> hexToBytes(const std::string& hex) {
+    std::vector<uint8_t> bytes;
+    for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+        bytes.push_back(static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+    }
+    return bytes;
+}
+
 int main(int argc, char** argv) {
     // Предварительный проход: ищем -config
     for (int i = 1; i < argc; ++i) {
@@ -38,18 +46,45 @@ int main(int argc, char** argv) {
     transport.setOnEvent([](const std::string& text) {
         json j = json::parse(text, nullptr, false);
         if (j.is_discarded()) {
-            // Пришло что-то не-JSON — показываем как есть
             Log::warn("ListenWords", "Не-JSON данные: ", text);
             return;
         }
 
         if (j.contains("words")) {
-            // PW-кадр, завёрнутый в JSON драйвером
             const auto& w = j["words"];
-            Log::info("ListenWords", "📦 PW кадр: size=", w.value("size", 0),
-                      " payload=", w.value("payload", std::string("")));
+            std::string hexPayload = w.value("payload", std::string(""));
+
+            // Декодируем hex-строку в байты
+            std::vector<uint8_t> bytes = hexToBytes(hexPayload);
+            //for (size_t i = 0; i + 1 < hexPayload.size(); i += 2) {
+            //    std::string byteStr = hexPayload.substr(i, 2);
+            //    bytes.push_back(static_cast<uint8_t>(std::stoi(byteStr, nullptr, 16)));
+            //}
+
+            Log::info("ListenWords", "📦 PW кадр: size=", bytes.size(), " bytes");
+
+            // Проверяем магик PW\x01 на декодированных байтах
+            if (bytes.size() >= 6 && bytes[0] == 'P' && bytes[1] == 'W' && bytes[2] == 0x01) {
+                Log::info("ListenWords", "✅ Магик PW\\x01 подтверждён");
+
+                // Показываем декодированные байты в hex
+                std::string hexDump;
+                for (uint8_t b : bytes) {
+                    char buf[4];
+                    snprintf(buf, sizeof(buf), "%02x ", b);
+                    hexDump += buf;
+                }
+                Log::info("ListenWords", "Hex: ", hexDump);
+
+                // Пробуем вывести как текст (с пропуском магика)
+                if (bytes.size() > 3) {
+                    std::string textPart(bytes.begin() + 3, bytes.end());
+                    Log::info("ListenWords", "Text: ", textPart);
+                }
+            } else {
+                Log::warn("ListenWords", "⚠️ Магик PW\\x01 не найден в декодированных байтах");
+            }
         } else {
-            // Обычное puheg-событие (process / transport / hardware / ...)
             Log::info("ListenWords", "📨 ", j.dump());
         }
     });
