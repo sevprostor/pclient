@@ -38,6 +38,7 @@ add_executable(pclient main.cpp
     commander.cpp
     eventbus.h
     eventbus.cpp
+    libs/json.hpp
 
 )
 

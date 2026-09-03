@@ -125,7 +125,7 @@ bool TCPclient::connectTCP(const std::string& address) {
     this->sessionAlive = true;
     this->lastPongTime = std::chrono::steady_clock::now();
     Log::info("TCPclient", "Подключено к ", address, ":", port);
-    EventBus::emit("link_up", "\"peer\":\"" + address + "\""); //Сообщить об этом в шину
+    //EventBus::emit("link_up", "\"peer\":\"" + address + "\""); //Сообщить об этом в шину
 
     if (readerThread_.joinable()) readerThread_.join();
     readerThread_ = std::thread(&TCPclient::readerLoop, this);
@@ -410,7 +410,7 @@ void TCPclient::processTimers() {
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
                 currentTime - this->lastPongTime).count() >= KEEPALIVE_TIMEOUT_MS) {
             Log::warn("TCPclient", "Нет ответа > ", KEEPALIVE_TIMEOUT_MS, " мс. Разрыв.");
-            EventBus::emit("link_down", "\"reason\":\"keepalive\"");
+            //EventBus::emit("link_down", "\"reason\":\"keepalive\"");
             this->sessionAlive = false;
             std::lock_guard<std::mutex> lock(socketMutex_);
             if (socketFd_ >= 0) {

@@ -13,22 +13,25 @@
 struct EventSubscriber {
     uint32_t ip;      // сетевой порядок
     uint16_t port;
+    std::vector<std::string> topics; // на что подписан
+    bool active = true;
 };
 
 class EventBus {
 public:
-    static bool init(Config*);       // сокет 127.0.0.1:port + поток чтения
+    static bool init(Config*);
     static void stop();
 
-    // толкнуть событие всем подписчикам; fields — готовые JSON-пары: "\"id\":5"
-    static void emit(const std::string& type, const std::string& fields = "");
+    // НОВОЕ: принять СЫРОЙ JSON пуheг-сообщения целиком.
+    // Сама определяет топики по ключам верхнего уровня
+    // ("transport", "process", "radio", "addressbook", ...)
+    // и рассылает сообщение подписчикам с совпавшим топиком.
+    static void emit(const std::string& rawJson);
 
+    // Подписки
     static void subscribe(uint32_t ip, uint16_t port);
     static void unsubscribe(uint32_t ip, uint16_t port);
 
-    static void setTransferSubscriber(uint32_t ip, uint16_t port);
-    static void emitTransfer(const std::vector<uint8_t>& data);
-    static bool hasTransferSubscriber();
 
 private:
     static void readerLoop();
@@ -36,11 +39,8 @@ private:
     static int sock_;
     static std::thread thr_;
     static std::atomic<bool> running_;
-    static std::vector<EventSubscriber> subs_;
+    static std::vector<EventSubscriber> msgSubscribers;
     static std::mutex mtx_;
-
-    static EventSubscriber transferSub_;
-    static std::atomic<bool> transferSubActive_;
 };
 
 #endif // EVENTBUS_H

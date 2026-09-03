@@ -16,11 +16,60 @@ extern TunInterface tun;
 
 MsgParser::RunningProcess runningProc;
 
+#include "libs/json.hpp"
+
+// Рекурсивный конвертер msgpack::object -> nlohmann::json.
+// Ключевое: BIN -> массив целых, чтобы emit видел реальные байты PW-кадра.
+static nlohmann::json msgpackToJson(const msgpack::object& o) {
+    using nlohmann::json;
+    switch (o.type) {
+    case msgpack::type::NIL:      return nullptr;
+    case msgpack::type::BOOLEAN:  return o.via.boolean;
+    case msgpack::type::POSITIVE_INTEGER: return o.via.u64;
+    case msgpack::type::NEGATIVE_INTEGER: return o.via.i64;
+    case msgpack::type::FLOAT32:
+    case msgpack::type::FLOAT64:  return o.via.f64;
+    case msgpack::type::STR:
+        return std::string(o.via.str.ptr, o.via.str.size);
+    case msgpack::type::BIN: {
+        json arr = json::array();
+        for (uint32_t i = 0; i < o.via.bin.size; ++i)
+            arr.push_back(static_cast<uint8_t>(o.via.bin.ptr[i]));
+        return arr;
+    }
+    case msgpack::type::ARRAY: {
+        json arr = json::array();
+        for (uint32_t i = 0; i < o.via.array.size; ++i)
+            arr.push_back(msgpackToJson(o.via.array.ptr[i]));
+        return arr;
+    }
+    case msgpack::type::MAP: {
+        json m = json::object();
+        for (uint32_t i = 0; i < o.via.map.size; ++i) {
+            const auto& kv = o.via.map.ptr[i];
+            std::string key = (kv.key.type == msgpack::type::STR)
+                                  ? std::string(kv.key.via.str.ptr, kv.key.via.str.size)
+                                  : std::to_string(i);
+            m[key] = msgpackToJson(kv.val);
+        }
+        return m;
+    }
+    default: return nullptr;
+    }
+}
+
 void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
     // Если пришел не словарь (Map), выходим — это некорректный системный пакет
     if (obj.type != msgpack::type::MAP) return;
 
-    // Конвертируем корень во временную C++ карту для независимого разбора блоков (аналог data.get() в Python)
+    // Каждое входящее puheg-сообщение целиком уходит в шину.
+    // EventBus сам решит, это событие или PW-кадр.
+    {
+        std::ostringstream jss;
+        jss << obj;
+        EventBus::emit(msgpackToJson(obj).dump());
+    }
+
     std::map<std::string, msgpack::object> root_map;
     obj.convert(root_map);
 
@@ -186,18 +235,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
                 if (!packetBytes.empty()) {
                     Log::info("MsgParser", "📥 Принят пакет, ", packetBytes.size(), " байт");
 
-                    // 1. ПРОВЕРКА НА FILE HAULER PROTOCOL (FH\x01)
-                    if (packetBytes.size() >= 3 &&
-                        packetBytes[0] == 'F' && packetBytes[1] == 'H' && packetBytes[2] == '\x01') {
 
-                        if (EventBus::hasTransferSubscriber()) {
-                            EventBus::emitTransfer(packetBytes);
-                            Log::info("MsgParser", "📦 FH-фрейм перехвачен, отправлен в EventBus");
-                        } else {
-                            Log::warn("MsgParser", "📦 FH-фрейм получен, но подписчика нет. Дроп.");
-                        }
-                        return; // ВАЖНО: выходим, в TUN не пишем!
-                    }
 
                     // 2. Проверка на текстовую команду драйвера (>>> ...)
                     if (Commander::isCommand(packetBytes.data(), packetBytes.size())) {
@@ -346,12 +384,13 @@ void MsgParser::watchProcess(const std::string& state, const std::string& thread
         }
         else if (state == "OK") {
             Log::info("Process", ">>> Процесс '", threadId, "' успешно завершен (OK)! <<<");
-            EventBus::emit("toss_ok", "\"thread\":" + threadId + "\"");
+
+            //EventBus::emit("toss_ok", "\"thread\":" + threadId + "\"");
             runningProc.running = false;
         }
         else if (state == "FAIL") {
             Log::error("Process", "!!! Процесс '", threadId, "' завершился с ошибкой (FAIL)! <<<");
-            EventBus::emit("toss_fail", "\"thread\":" + threadId + "\"");
+            //EventBus::emit("toss_fail", "\"thread\":" + threadId + "\"");
             runningProc.running = false;
         }
     }

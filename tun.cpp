@@ -231,7 +231,7 @@ void TunInterface::processPacket(const std::vector<uint8_t>& packet, TCPclient* 
             client->sendMessage(&pumsg);
         }
         Log::info("TUN", "📡 Бродкаст: веер на ", contacts.size(), " контактов");
-        EventBus::emit("broadcast", "\"n\":" + std::to_string(contacts.size()) + "\"");
+        //EventBus::emit("broadcast", "\"n\":" + std::to_string(contacts.size()) + "\"");
         return;
     }
 
