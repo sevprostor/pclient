@@ -66,6 +66,7 @@ public:
         uint8_t netsp = 0;
         std::string key = "";
         std::string name = "";
+        bool myOwn = false;
 
         // Вычисление IP из MAC (возвращает значение в СЕТЕВОМ порядке байт)
         uint32_t ipAddr() const {
@@ -105,6 +106,7 @@ public:
 
     uint16_t getMyId() const;
     bool getContact(uint16_t id, Contact& out_contact) const;
+    bool getContacts(std::vector<Contact>& out_contact) const;
 };
 
 // Глобальные переменные (объявления)

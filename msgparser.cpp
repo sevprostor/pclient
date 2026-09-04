@@ -105,6 +105,7 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
             bool my_own = rec_map.count("myOwn") ? (rec_map["myOwn"].as<int32_t>() != 0) : false;
 
             if (my_own) {
+                c.myOwn = true;
                 Addressbook::getInstance().setMyProfile(c.id, c);
             } else {
                 Addressbook::getInstance().setContact(c.id, c);

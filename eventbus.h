@@ -41,6 +41,10 @@ private:
     static std::atomic<bool> running_;
     static std::vector<EventSubscriber> msgSubscribers;
     static std::mutex mtx_;
+    // НОВОЕ: буфер приёма, выделяется один раз при init()
+    static std::vector<char> recvBuf_;
 };
 
 #endif // EVENTBUS_H
+
+

@@ -35,10 +35,14 @@ std::thread EventBus::thr_;
 std::atomic<bool> EventBus::running_{false};
 std::vector<EventSubscriber> EventBus::msgSubscribers;
 std::mutex EventBus::mtx_;
+std::vector<char> EventBus::recvBuf_;
 
 bool EventBus::init(Config* config) {
     uint16_t currentPort = config->eventBusPort;
     const uint16_t maxAttempts = 100;
+    // НОВОЕ: выделяем буфер приёма один раз
+    // 8192 байт достаточно для чанков до ~8000 байт + overhead
+    recvBuf_.resize(8192);
 
     for (uint16_t attempt = 0; attempt < maxAttempts; ++attempt) {
         sock_ = socket(AF_INET, SOCK_DGRAM, 0);
@@ -87,7 +91,7 @@ void EventBus::stop() {
 
 
 void EventBus::readerLoop() {
-    char buf[2048];
+    //char buf[65536];
     while (running_) {
         fd_set rfds; FD_ZERO(&rfds); FD_SET(sock_, &rfds);
         timeval tv{0, 100000};
@@ -95,19 +99,31 @@ void EventBus::readerLoop() {
         if (r <= 0) continue;
 
         sockaddr_in from{}; socklen_t fl = sizeof(from);
-        ssize_t n = recvfrom(sock_, buf, sizeof(buf) - 1, 0, (sockaddr*)&from, &fl);
+
+        // НОВОЕ: читаем в заранее выделенный буфер
+        ssize_t n = recvfrom(sock_, recvBuf_.data(), recvBuf_.size(), 0,
+                             (sockaddr*)&from, &fl);
         if (n <= 0) continue;
-        buf[n] = '\0';
-        std::string text(buf);
+
+        // ИСПРАВЛЕНО: бинарно-безопасное создание строки
+        // Старый код: buf[n] = '\0'; std::string text(buf);  <-- обрезает на нулевых байтах
+        // Новый код:
+        std::string text(recvBuf_.data(), n);  // строка точной длины n
+
+        //ssize_t n = recvfrom(sock_, buf, sizeof(buf) - 1, 0, (sockaddr*)&from, &fl);
+        //if (n <= 0) continue;
+        //buf[n] = '\0';
+        //std::string text(buf);
 
         // ============================================================
         // ВАРИАНТ 1: JSON-запрос (начинается с '{')
         // Форматы: {"subscribe": ["topic1", "topic2", "haul"]}
         //          {"unsubscribe": true}
         // ============================================================
-        if (n > 2 && buf[0] == '{') {
+        //if (n > 2 && buf[0] == '{') {
+        if (n > 2 && text[0] == '{') {
             // Строка точной длины n (бинарно-безопасно)
-            std::string text(reinterpret_cast<const char*>(buf), n);
+            //std::string text(reinterpret_cast<const char*>(buf), n);
 
             // Парсим JSON; при ошибке ловим исключение и логируем позицию
             json j;
@@ -150,7 +166,48 @@ void EventBus::readerLoop() {
                         topicsStr += t;
                     }
                     Log::info("EventBus", "✅ Подписка на порту ", ntohs(from.sin_port),
-                              ", топики: [", topicsStr, "]");
+                              ", темы : [", topicsStr, "]");
+
+                    // НОВОЕ: Проверяем, подписан ли клиент на "netprofile"
+                    //bool wantsNetProfile = false;
+                    for (const std::string& topic : topics) {
+
+                        Log::info("EventBus", topic);
+                        if (topic == "netprofile") {
+                            Log::info("EventBus", "netprofile");
+                            //wantsNetProfile = true;
+                            //break;
+                        //}
+                    //}
+
+                    // НОВОЕ: Отправляем инициализационное сообщение
+                    //if (wantsNetProfile) {
+
+                        // Формируем JSON для netprofile
+                        json netprofile;
+
+                        // Получаем все контакты
+                        std::vector<Addressbook::Contact> contacts;
+                        Addressbook::getInstance().getContacts(contacts);
+                        json contactsArray = json::array();
+                        for (const auto& contact : contacts) {
+                            json c;
+                            c["ip"] = contact.ipString();
+                            c["id"] = contact.id;
+                            c["key"] = contact.key;
+                            if(contact.myOwn) c["myOwn"] = 1;
+                            c["name"] = contact.name;
+                            // Можно добавить дополнительные поля по мере необходимости
+                            contactsArray.push_back(c);
+                        }
+                        netprofile["contacts"] = contactsArray;
+
+                        // Отправляем через emit — только тем, кто подписался на "netprofile"
+                        emit(netprofile.dump());
+                        Log::info("EventBus", "📤 Отправлен netprofile на порт ", ntohs(from.sin_port));
+                    }}
+
+
                 } else {
                     Log::warn("EventBus", "⚠️ Ключ \"subscribe\" есть, но массив топиков пуст: ", text);
                 }
@@ -182,12 +239,15 @@ void EventBus::readerLoop() {
         // ============================================================
         if (n >= 7) {
             uint32_t ipNetworkOrder;
-            std::memcpy(&ipNetworkOrder, buf, 4);
+            //std::memcpy(&ipNetworkOrder, buf, 4);
+            std::memcpy(&ipNetworkOrder, text.data(), 4);
 
             char ipStr[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &ipNetworkOrder, ipStr, INET_ADDRSTRLEN);
 
-            std::vector<uint8_t> payload(buf + 4, buf + n);
+            //std::vector<uint8_t> payload(buf + 4, buf + n);
+            // Payload — через итераторы строки (безопасно и читаемо)
+            std::vector<uint8_t> payload(text.begin() + 4, text.begin() + n);
 
             if (payload.size() >= 3 && payload[0] == 'P' && payload[1] == 'W' && payload[2] == '\x01') {
                 Addressbook::Contact destContact;
@@ -291,6 +351,9 @@ void EventBus::emit(const std::string& rawJson) {
                         {"payload", bytesToHex(bytes)}  // hex-строка
                     };
 
+                    // данные уже в words.payload, не дублируем
+                    j["transport"]["downlink"].erase("packet");
+
                     //Log::info("EventBus", "PW: ", bytesToHex(bytes));
                 }
             }
@@ -301,8 +364,12 @@ void EventBus::emit(const std::string& rawJson) {
 
     // ШАГ 4: единообразная маршрутизация по ключам верхнего уровня
     std::lock_guard<std::mutex> lk(mtx_);
+
+    //размотать всех подписчиков и если в их интересах этот топик есть в жсоне - отправить.
     for (const auto& s : msgSubscribers) {
         if (!s.active) continue;
+
+        //размотать топики подписчика
         for (const auto& topic : s.topics) {
             if (topic == "*" || j.contains(topic)) {
                 //Log::info("EventBus", "raw packet to ", s.port, ": ", out);
@@ -310,6 +377,8 @@ void EventBus::emit(const std::string& rawJson) {
                 to.sin_family = AF_INET;
                 to.sin_addr.s_addr = s.ip;
                 to.sin_port = htons(s.port);
+
+                //И отправить весь жсон, если это там есть
                 sendto(sock_, out.data(), out.size(), 0, (sockaddr*)&to, sizeof(to));
                 break; // одно сообщение — одна отправка подписчику
             }

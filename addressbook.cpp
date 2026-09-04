@@ -14,7 +14,11 @@ void Addressbook::setOnProfileReadyCallback(std::function<void()> callback) {
 void Addressbook::setMyProfile(uint16_t id, const Contact& profile) {
     std::unique_lock lock(ab_mutex);
     //my_id = id;
+
+
     myProfile = profile;
+
+
     //std::cout << "[Addressbook] Успешно сохранен собственный профиль. Мой ID: "
     //          << my_id << ", Публичный ключ: " << myProfile.key << std::endl;
 
@@ -64,6 +68,23 @@ bool Addressbook::getContact(uint16_t id, Contact& out_contact) const {
         out_contact = it->second;
         return true;
     }
+    return false;
+}
+
+bool Addressbook::getContacts(std::vector<Contact>& out_contact) const {
+
+    std::shared_lock lock(ab_mutex);
+
+    //Contact mc = myProfile;
+
+    out_contact.emplace_back(myProfile);
+
+    for (const auto& [id, c] : contacts) {
+
+        out_contact.emplace_back(c);
+
+    }
+
     return false;
 }
 
