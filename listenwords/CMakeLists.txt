@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(PuhegWordsListener LANGUAGES CXX)
+project(PuhegWords-listener LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,9 @@ add_executable(listenwords main.cpp
     config.cpp
     words.h
     words.cpp
-    log.h)
+    log.h
+    file.h
+    file.cpp)
 
 include(GNUInstallDirs)
 install(TARGETS listenwords

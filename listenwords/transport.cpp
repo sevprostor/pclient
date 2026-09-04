@@ -8,6 +8,10 @@
 #include <cstdio>
 
 bool Transport::init(uint16_t driverPort) {
+
+    // НОВОЕ: выделяем буфер приёма под максимальную UDP-датаграмму
+    recvBuf_.resize(65536);
+
     driverPort_ = driverPort;
     sock_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_ < 0) return false;
@@ -32,7 +36,7 @@ bool Transport::init(uint16_t driverPort) {
     // Подписка: words (PW-кадры) + ключи puheg-сообщений
     std::string sub =
         "{\"subscribe\": [\"words\", \"transport\", \"process\", "
-        "\"addressbook\"]}";
+        "\"netprofile\"]}";
     sendto(sock_, sub.c_str(), sub.size(), 0, (sockaddr*)&bus, sizeof(bus));
 
     return true;
@@ -86,15 +90,15 @@ void Transport::poll(int timeoutMs) {
     timeval tv{0, timeoutMs * 1000};
     if (select(sock_ + 1, &rfds, nullptr, nullptr, &tv) <= 0) return;
 
-    uint8_t buf[2048];
-    ssize_t n = recvfrom(sock_, buf, sizeof(buf), 0, nullptr, nullptr);
+    // НОВОЕ: читаем в большой буфер вместо локальных 2048 байт
+    ssize_t n = recvfrom(sock_, recvBuf_.data(), recvBuf_.size(), 0, nullptr, nullptr);
+
+    //ssize_t n = recvfrom(sock_, buf, sizeof(buf), 0, nullptr, nullptr);
     if (n <= 0) return;
 
-    // Всё, что начинается с '{' — JSON-событие (включая PW-кадры в JSON)
-    if (buf[0] == '{') {
-        if (onEvent_) onEvent_(std::string(reinterpret_cast<char*>(buf), n));
+    if (recvBuf_[0] == '{') {
+        if (onEvent_) onEvent_(std::string(reinterpret_cast<char*>(recvBuf_.data()), n));
     } else {
-        // Сырые бинарные кадры (на будущее)
-        if (onFrame_) onFrame_(std::vector<uint8_t>(buf, buf + n));
+        if (onFrame_) onFrame_(std::vector<uint8_t>(recvBuf_.begin(), recvBuf_.begin() + n));
     }
 }

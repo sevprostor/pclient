@@ -2,6 +2,8 @@
 #include "transport.h"
 #include "log.h"      // <-- единый вывод
 #include "../libs/json.hpp"
+#include "words.h"
+#include "file.h"
 #include <string>
 
 using json = nlohmann::json;
@@ -41,56 +43,71 @@ int main(int argc, char** argv) {
     }
 
     Log::info("ListenWords", "Слушаю EventBus на порту ", config.eventBusPort, "...");
+    /////////////////////////////////////////////
 
-    // Всё приходит как JSON (события и PW-кадры, завёрнутые в JSON)
-    transport.setOnEvent([](const std::string& text) {
-        json j = json::parse(text, nullptr, false);
-        if (j.is_discarded()) {
-            Log::warn("ListenWords", "Не-JSON данные: ", text);
-            return;
-        }
+        // ... конфиг и transport.init(...) без изменений ...
 
-        if (j.contains("words")) {
-            const auto& w = j["words"];
-            std::string hexPayload = w.value("payload", std::string(""));
+        Words words;
+        File file;         // <-- НОВОЕ: объект для сборки файлов
 
-            // Декодируем hex-строку в байты
-            std::vector<uint8_t> bytes = hexToBytes(hexPayload);
-            //for (size_t i = 0; i + 1 < hexPayload.size(); i += 2) {
-            //    std::string byteStr = hexPayload.substr(i, 2);
-            //    bytes.push_back(static_cast<uint8_t>(std::stoi(byteStr, nullptr, 16)));
-            //}
-
-            Log::info("ListenWords", "📦 PW кадр: size=", bytes.size(), " bytes");
-
-            // Проверяем магик PW\x01 на декодированных байтах
-            if (bytes.size() >= 6 && bytes[0] == 'P' && bytes[1] == 'W' && bytes[2] == 0x01) {
-                Log::info("ListenWords", "✅ Магик PW\\x01 подтверждён");
-
-                // Показываем декодированные байты в hex
-                std::string hexDump;
-                for (uint8_t b : bytes) {
-                    char buf[4];
-                    snprintf(buf, sizeof(buf), "%02x ", b);
-                    hexDump += buf;
-                }
-                Log::info("ListenWords", "Hex: ", hexDump);
-
-                // Пробуем вывести как текст (с пропуском магика)
-                if (bytes.size() > 3) {
-                    std::string textPart(bytes.begin() + 3, bytes.end());
-                    Log::info("ListenWords", "Text: ", textPart);
-                }
-            } else {
-                Log::warn("ListenWords", "⚠️ Магик PW\\x01 не найден в декодированных байтах");
+        transport.setOnEvent([&words, &file](const std::string& text) {
+            json j = json::parse(text, nullptr, false);
+            if (j.is_discarded()) {
+                Log::warn("ListenWords", "Не-JSON данные: ", text);
+                return;
             }
-        } else {
-            Log::info("ListenWords", "📨 ", j.dump());
-        }
-    });
 
-    // Бесконечный цикл приёма
-    while (true) transport.poll(100);
+            if (!j.contains("words")) {
+                Log::info("ListenWords", "📨 ", j.dump());
+                return;
+            }
 
-    return 0;
-}
+            std::vector<uint8_t> bytes = Words::hexToBytes(j["words"].value("payload", std::string("")));
+            if (bytes.size() < 3 || bytes[0] != 'P' || bytes[1] != 'W' || bytes[2] != 0x01) {
+                Log::warn("ListenWords", "⚠️ Отсутствует магик PW\\x01");
+                return;
+            }
+            std::vector<uint8_t> body(bytes.begin() + 3, bytes.end());
+
+            Envelope env;
+            if (!words.parseEnvelope(body, env)) return;
+
+            switch (env.type) {
+            case 'F': {
+                PwFile pwFile;
+                if (words.parseFile(body, pwFile)) {
+                    Log::info("ListenWords", "📥 FILE: ", pwFile.name,
+                              " part ", (int)pwFile.part, "/", (int)pwFile.totalParts,
+                              " uuid=", pwFile.uuid,
+                              " sender=", pwFile.env.sender,
+                              " content=", pwFile.content.size(), " байт");
+
+                    // Сборка файла
+                    if (file.assembleFile(pwFile)) {
+                        Log::info("ListenWords", "✅ Файл полностью получен!");
+                    }
+                }
+                break;
+            }
+            case '0': {
+                PwProof proof;
+                if (words.parseProof(body, proof)) {
+                    Log::info("ListenWords", "🔑 PROOF от sender=", proof.env.sender);
+                }
+                break;
+            }
+            case 'C': {
+                PwCommand cmd;
+                if (words.parseCommand(body, cmd)) {
+                    Log::info("ListenWords", "⚡ COMMAND от sender=", cmd.env.sender);
+                }
+                break;
+            }
+            default:
+                Log::warn("ListenWords", "⚠️ Неизвестный тип пакета: '", env.type, "'");
+            }
+        });
+
+        while (true) transport.poll(100);
+        return 0;
+    }

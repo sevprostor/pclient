@@ -1,55 +1,52 @@
-#ifndef WORDS_H
-#define WORDS_H
 #pragma once
-//#include "transport.h"
+#include <cstdint>
 #include <string>
-#include <atomic>
 #include <vector>
 
-/*
+// ===========================================================================
+// СТРУКТУРЫ — только данные, без логики
+// ===========================================================================
 
-Пакет: PW(3 байта) заведомо отброшены
-Envelope
-type (0) | sender (1-2) | payload (3....) |
-
-types
-'0' - proof
-'F' - file
-'C' - command
-
-sender - последние октеты IP (мак-адрес)
-uuid - уникальный номер передачи
-
-PWfile (F)
-[proofType (2bit)| nameSize (6bit)] (total 1 byte) | name (nameSize) |  uuid (3) | totalParts (1) | part (1) |
-
-*/
-
-struct Envelope{
-    uint8_t type;
+// Общий заголовок любого PW-пакета (после магика PW\x01):
+//   type   (1 байт) — '0' proof | 'F' file | 'C' command
+//   sender (2 байта) — последние октеты IP = MAC
+struct Envelope {
+    char     type   = 0;
+    uint16_t sender = 0;
 };
 
-struct Pwfile{
-    uint32_t sender;
-    uint32_t id;
-    std::string fname;
-    uint8_t totalParts;
-    uint8_t thisPart;
+// Пакет типа 'F' — чанк файла:
+//   [proofType(2 бит) | nameSize(6 бит)] (1 байт)
+//   name (nameSize) | uuid (3) | totalParts (1) | part (1) | content (...)
+struct PwFile {
+    Envelope   env;
+    uint8_t    proofType  = 0;
+    std::string name;
+    uint32_t   uuid       = 0;
+    uint8_t    totalParts = 0;
+    uint8_t    part       = 0;
     std::vector<uint8_t> content;
 };
 
-class PuhegWords {
+struct PwProof   { Envelope env; /* TODO */ };
+struct PwCommand { Envelope env; /* TODO */ };
+
+// ===========================================================================
+// КЛАСС — методы разбора; заполняют структуры по ссылке
+// ===========================================================================
+
+class Words {
 public:
+    // Разбор общего заголовка: type (1) + sender (2)
+    bool parseEnvelope(const std::vector<uint8_t>& data, Envelope& env) const;
 
-    Pwfile recieveFile();
-    //PuhegWords(Transport& transport);
+    // Разбор кадра типа 'F' (включая envelope -> file.env)
+    bool parseFile(const std::vector<uint8_t>& data, PwFile& file) const;
 
-    //bool sendFile(const std::string& filePath, const std::string& destIp);
-    //void recvFiles(const std::string& outDir);
-    //void stop();
+    // Заглушки на будущее
+    bool parseProof(const std::vector<uint8_t>& data, PwProof& proof) const;
+    bool parseCommand(const std::vector<uint8_t>& data, PwCommand& cmd) const;
 
-private:
-    //Transport& transport_;
-    //std::atomic<bool> running_{false};
+    // Утилита: hex-строка -> байты
+    static std::vector<uint8_t> hexToBytes(const std::string& hex);
 };
-#endif // HAULER_H

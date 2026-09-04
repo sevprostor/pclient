@@ -29,4 +29,8 @@ private:
     uint16_t driverPort_ = 9400;
     OnFrameCallback onFrame_;
     OnEventCallback onEvent_;
+
+    // НОВОЕ: буфер приёма. Максимальный размер UDP-датаграммы 65507 байт,
+    // берём с запасом 65536. Чанки по 2000 байт в JSON-обёртке дают ~10 КБ.
+    std::vector<uint8_t> recvBuf_;
 };
