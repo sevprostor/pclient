@@ -2,8 +2,10 @@
 #include "transport.h"
 #include "log.h"      // <-- единый вывод
 #include "../libs/json.hpp"
-#include "words.h"
-#include "file.h"
+//#include "words.h"
+//#include "file.h"
+#include "ebparser.h"
+#include "ebparser.h"
 #include <string>
 
 using json = nlohmann::json;
@@ -43,13 +45,17 @@ int main(int argc, char** argv) {
     }
 
     Log::info("ListenWords", "Слушаю EventBus на порту ", config.eventBusPort, "...");
-    /////////////////////////////////////////////
 
-        // ... конфиг и transport.init(...) без изменений ...
+        //Words words;
+        //File file;         // <-- НОВОЕ: объект для сборки файлов
 
-        Words words;
-        File file;         // <-- НОВОЕ: объект для сборки файлов
 
+    while (true){
+        EBMessage emsg = transport.poll(100);
+        if(emsg.evenbus) EBParser::parseEmsg(&emsg.rawtext);
+
+    }
+        /*
         transport.setOnEvent([&words, &file](const std::string& text) {
             json j = json::parse(text, nullptr, false);
             if (j.is_discarded()) {
@@ -57,57 +63,61 @@ int main(int argc, char** argv) {
                 return;
             }
 
-            if (!j.contains("words")) {
-                Log::info("ListenWords", "📨 ", j.dump());
-                return;
-            }
 
-            std::vector<uint8_t> bytes = Words::hexToBytes(j["words"].value("payload", std::string("")));
-            if (bytes.size() < 3 || bytes[0] != 'P' || bytes[1] != 'W' || bytes[2] != 0x01) {
-                Log::warn("ListenWords", "⚠️ Отсутствует магик PW\\x01");
-                return;
-            }
-            std::vector<uint8_t> body(bytes.begin() + 3, bytes.end());
+            if (j.contains("words")) {
 
-            Envelope env;
-            if (!words.parseEnvelope(body, env)) return;
+                std::vector<uint8_t> bytes = Words::hexToBytes(j["words"].value("payload", std::string("")));
+                if (bytes.size() < 3 || bytes[0] != 'P' || bytes[1] != 'W' || bytes[2] != 0x01) {
+                    Log::warn("ListenWords", "⚠️ Отсутствует магик PW\\x01");
+                    return;
+                }
+                std::vector<uint8_t> body(bytes.begin() + 3, bytes.end());
 
-            switch (env.type) {
-            case 'F': {
-                PwFile pwFile;
-                if (words.parseFile(body, pwFile)) {
-                    Log::info("ListenWords", "📥 FILE: ", pwFile.name,
-                              " part ", (int)pwFile.part, "/", (int)pwFile.totalParts,
-                              " uuid=", pwFile.uuid,
-                              " sender=", pwFile.env.sender,
-                              " content=", pwFile.content.size(), " байт");
+                Envelope env;
+                if (!words.parseEnvelope(body, env)) return;
 
-                    // Сборка файла
-                    if (file.assembleFile(pwFile)) {
-                        Log::info("ListenWords", "✅ Файл полностью получен!");
+                switch (env.type) {
+                case 'F': {
+                    PwFile pwFile;
+                    if (words.parseFile(body, pwFile)) {
+                        Log::info("ListenWords", "📥 FILE: ", pwFile.name,
+                                  " part ", (int)pwFile.part, "/", (int)pwFile.totalParts,
+                                  " uuid=", pwFile.uuid,
+                                  " sender=", pwFile.env.sender,
+                                  " content=", pwFile.content.size(), " байт");
+
+                        // Сборка файла
+                        if (file.assembleFile(pwFile)) {
+                            Log::info("ListenWords", "✅ Файл полностью получен!");
+                        }
                     }
+                    break;
                 }
-                break;
-            }
-            case '0': {
-                PwProof proof;
-                if (words.parseProof(body, proof)) {
-                    Log::info("ListenWords", "🔑 PROOF от sender=", proof.env.sender);
+                case '0': {
+                    PwProof proof;
+                    if (words.parseProof(body, proof)) {
+                        Log::info("ListenWords", "🔑 PROOF от sender=", proof.env.sender);
+                    }
+                    break;
                 }
-                break;
-            }
-            case 'C': {
-                PwCommand cmd;
-                if (words.parseCommand(body, cmd)) {
-                    Log::info("ListenWords", "⚡ COMMAND от sender=", cmd.env.sender);
+                case 'C': {
+                    PwCommand cmd;
+                    if (words.parseCommand(body, cmd)) {
+                        Log::info("ListenWords", "⚡ COMMAND от sender=", cmd.env.sender);
+                    }
+                    break;
                 }
-                break;
+                default:
+                    Log::warn("ListenWords", "⚠️ Неизвестный тип пакета: '", env.type, "'");
+                }
             }
-            default:
-                Log::warn("ListenWords", "⚠️ Неизвестный тип пакета: '", env.type, "'");
-            }
-        });
 
-        while (true) transport.poll(100);
+
+        });*/
+
+        //while (true) transport.poll(100);
+        //poll должен принимать и менять стринг,
+        //а не вот это вот все с колбеками!
+
         return 0;
     }

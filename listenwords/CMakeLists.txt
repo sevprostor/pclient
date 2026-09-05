@@ -16,7 +16,9 @@ add_executable(listenwords main.cpp
     words.cpp
     log.h
     file.h
-    file.cpp)
+    file.cpp
+    ebparser.h
+    ebparser.cpp)
 
 include(GNUInstallDirs)
 install(TARGETS listenwords
