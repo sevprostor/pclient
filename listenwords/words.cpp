@@ -71,3 +71,57 @@ bool Words::parseCommand(const std::vector<uint8_t>& data, PwCommand& cmd) const
     // TODO: поля command
     return true;
 }
+
+// ============================================================
+// Сборка исходящего файлового кадра (зеркало parseFile)
+// Формат: 'F' | sender(2, network order) | header | name | uuid(3) | totalParts | part | content
+// header = [proofType(2 бита) | nameSize(6 бит)]
+// ============================================================
+std::vector<uint8_t> Words::buildFileFrame(
+    uint16_t sender,
+    uint32_t uuid,
+    const std::string& name,
+    uint8_t totalParts,
+    uint8_t part,
+    const std::vector<uint8_t>& content,
+    uint8_t proofType)
+{
+    std::vector<uint8_t> frame;
+    std::string name_b = name;
+
+    // Имя файла ограничено 6 битами в header — максимум 63 байта
+    if (name_b.size() > 63) {
+        Log::error("Words", "Имя файла длиннее 63 байт: ", name);
+        name_b = name_b.substr(0, 63);
+    }
+
+    // header: старшие 2 бита — proofType, младшие 6 — длина имени
+    uint8_t header = ((proofType & 0x3) << 6) | (name_b.size() & 0x3F);
+
+    // type
+    frame.push_back('F');
+
+    // sender (network order)
+    frame.push_back((sender >> 8) & 0xFF);
+    frame.push_back(sender & 0xFF);
+
+    // header
+    frame.push_back(header);
+
+    // name
+    frame.insert(frame.end(), name_b.begin(), name_b.end());
+
+    // uuid (24 бита)
+    frame.push_back((uuid >> 16) & 0xFF);
+    frame.push_back((uuid >> 8) & 0xFF);
+    frame.push_back(uuid & 0xFF);
+
+    // totalParts, part
+    frame.push_back(totalParts);
+    frame.push_back(part);
+
+    // content
+    frame.insert(frame.end(), content.begin(), content.end());
+
+    return frame;
+}

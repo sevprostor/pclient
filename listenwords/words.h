@@ -49,4 +49,15 @@ public:
 
     // Утилита: hex-строка -> байты
     static std::vector<uint8_t> hexToBytes(const std::string& hex);
+
+    // НОВОЕ: собрать кадр типа 'F' для отправки
+    static std::vector<uint8_t> buildFileFrame(
+        uint16_t sender,
+        uint32_t uuid,
+        const std::string& name,
+        uint8_t totalParts,
+        uint8_t part,
+        const std::vector<uint8_t>& content,
+        uint8_t proofType = 0
+        );
 };

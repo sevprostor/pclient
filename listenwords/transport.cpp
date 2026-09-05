@@ -122,27 +122,21 @@ EBMessage Transport::poll(int timeoutMs) {
     //ssize_t n = recvfrom(sock_, buf, sizeof(buf), 0, nullptr, nullptr);
     if (n <= 0) return justRecv;
 
-    // Локальная детекция netprofile — для выхода из init()
-    // Ищем ключ "netprofile" в JSON, чтобы не дёргать тяжёлый парсер в цикле ожидания
-    //std::string text(reinterpret_cast<char*>(recvBuf_.data()), n);
-    //std::string text(reinterpret_cast<char*>(recvBuf_.data()), n);
-    //text = txt.data();
 
-    //if (!inited_ && text.find("\"netprofile\"") != std::string::npos) {
 
-        //Log::info("Transport", "netprofile rcvd");
-        //inited_ = true;
-    //}
-
-    //Вместо этого разобрать жсон
     if (recvBuf_[0] == '{') {
         justRecv.evenbus = true;
-        justRecv.rawtext = std::string(reinterpret_cast<char*>(recvBuf_.data()), n);
-    //    if (onEvent_) onEvent_(text);
+
+        // ВАЖНО: строка ровно из n байт! Иначе хвост предыдущей датаграммы
+        // (старые "words", хвосты JSON) прилипает к текущему сообщению
+        justRecv.rawtext.assign(reinterpret_cast<const char*>(recvBuf_.data()), static_cast<size_t>(n));
+
+        //Log::info("Transport", "json rcvd: ", justRecv.rawtext);
+    } else {
+        // Бинарный кадр — тоже копируем ровно n байт
+        justRecv.binary = true;
+        justRecv.wordsframe.assign(recvBuf_.begin(), recvBuf_.begin() + n);
     }
 
-    //else {
-    //    if (onFrame_) onFrame_(std::vector<uint8_t>(recvBuf_.begin(), recvBuf_.begin() + n));
-    //}
     return justRecv;
 }

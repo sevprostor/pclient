@@ -9,36 +9,73 @@
 
 using json = nlohmann::json;
 
+//File file;
 
+void EBParser::parseEmsg(const EBMessage& msg, File& file) {
+    if (!msg.evenbus) return;
 
-void EBParser::parseEmsg(std::string* text) {
+    json j = json::parse(msg.rawtext, nullptr, false);
+    if (j.is_discarded()) return;
 
-    //Разбор шинного сообщения
+    if (j.contains("netprofile")) netprofileTopic(msg, file);
+    if (j.contains("words")) wordsTopic(msg, file);
+    //if (j.contains("process")) processTopic(msg);
+}
 
-    json eventExMsg = json::parse(text->data(), nullptr, false);
-    if (eventExMsg.is_discarded()) {
-        Log::warn("ListenWords", "Не-JSON данные: ", text);
+void EBParser::netprofileTopic(const EBMessage& msg, File& file) {
+    json j = json::parse(msg.rawtext, nullptr, false);
+    if (j.is_discarded()) {
+        Log::error("EBParser", "❌ Ошибка парсинга JSON");
         return;
     }
 
-    if(eventExMsg.contains("netprofile")) netprofileTopic(text);
+    if (!j.contains("netprofile") || !j["netprofile"].contains("contacts")) {
+        Log::warn("EBParser", "⚠️ В JSON отсутствует netprofile.contacts");
+        return;
+    }
 
-    if(eventExMsg.contains("words")) wordsTopic(text);
+    const auto& np = j["netprofile"];
+    const auto& contacts = np["contacts"];
 
+    if (!contacts.is_array()) {
+        Log::error("EBParser", "❌ netprofile.contacts не является массивом");
+        return;
+    }
 
+    Log::info("EBParser", "📡 NetProfile получен, контактов: ", contacts.size());
+
+    // Очищаем адресную книгу перед заполнением
+    config.addressbook.clear();
+
+    Config::abc contact;
+    for (const auto& c : contacts) {
+        uint16_t id = static_cast<uint16_t>(c.value("id", 0));
+        std::string ip = c.value("ip", "");
+        std::string key = c.value("key", "");
+
+        contact.mac = id;
+        contact.ip = ip;
+        contact.key = key;
+
+        // Проверяем флаг myOwn
+        if (c.contains("myOwn")) {
+            config.myContact = contact;
+            Log::info("EBParser", "  👤 Мой контакт: id=", id, ", ip=", ip);
+        } else {
+            config.addressbook.emplace_back(contact);
+            Log::info("EBParser", "  - id=", id, ", ip=", ip);
+        }
+    }
+
+    Log::info("EBParser", "✅ Адресная книга загружена: ", config.addressbook.size(), " контактов");
 }
 
-void EBParser::netprofileTopic(std::string* text){
-    Log::info("EBParser", "Netprofile rcvd: ", text->data());
-
-}
-
-void EBParser::wordsTopic(std::string* topic){
+void EBParser::wordsTopic(const EBMessage& msg, File& file){
 
     Words words;
-    File file;
 
-    json j = json::parse(topic->data(), nullptr, false);
+    //std::string topic = msg.rawtext;
+    json j = json::parse(msg.rawtext, nullptr, false);
 
     std::vector<uint8_t> bytes = Words::hexToBytes(j["words"].value("payload", std::string("")));
 
@@ -85,4 +122,6 @@ void EBParser::wordsTopic(std::string* topic){
     default:
         Log::warn("ListenWords", "⚠️ Неизвестный тип пакета: '", env.type, "'");
     }
+
+
 }

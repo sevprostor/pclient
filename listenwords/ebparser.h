@@ -5,6 +5,8 @@
 #include <string>
 #include <cstdint>
 #include <vector>
+#include "file.h"
+
 
 
 struct EBMessage{
@@ -22,12 +24,12 @@ struct EBMessage{
 class EBParser{
 public:
 
-    static void parseEmsg(std::string*);
+    static void parseEmsg(const EBMessage&, File&);
 
     //обработка разных шинных сообщений
-    static void wordsTopic(std::string*);
-    static void processTopic(std::string*);
-    static void netprofileTopic(std::string*);
+    static void wordsTopic(const EBMessage&, File&);
+    static void processTopic(const EBMessage&, File&);
+    static void netprofileTopic(const EBMessage&, File&);
 
 private:
 

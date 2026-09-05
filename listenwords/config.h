@@ -22,8 +22,8 @@ struct Config {
     std::vector<abc> addressbook;
 
 
-    //bool loadFromFile(const std::string& filename);
-    //bool parseCommandLine(int argc, char** argv);
+    bool loadFromFile(const std::string& filename);
+    bool parseCommandLine(int argc, char** argv);
 };
 
 extern Config config;

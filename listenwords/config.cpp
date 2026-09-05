@@ -4,7 +4,7 @@
 #include <string>
 #include <cctype>
 
-Config config;
+//Config config;
 
 bool Config::loadFromFile(const std::string& filename) {
     std::ifstream file(filename);
