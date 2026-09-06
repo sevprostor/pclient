@@ -29,14 +29,18 @@ public:
         std::vector<int> msg; //Это должно отправляться как массив байт JSON
         std::vector<uint8_t> packedMsg;
         uint32_t thread = 0;
+        //std::string thread;
 
         MSGPACK_DEFINE_MAP(id, what, todo, howmuch, msg, thread);
+
+        uint16_t initiator = 0;
 
     };
 
     struct RunningProcess{
         uint32_t thread;
         std::string state;
+        uint16_t initiator = 0; //порт инициатора процесса, для адресной отправки еб-сообщений
         bool running = false;
         std::chrono::steady_clock::time_point startTime; // <-- ДОБАВЛЕНО
         std::chrono::steady_clock::time_point lastResponseTime; // <-- ДОБАВЛЕНО
@@ -45,6 +49,13 @@ public:
 
     struct RxTransaction {
         std::atomic<bool> active{false};
+        uint32_t id = 0;
+        std::chrono::steady_clock::time_point lastMsgTime;
+    };
+
+    struct RxTxTransaction {
+        std::atomic<bool> active{false};
+        std::atomic<bool> uplink{false};
         uint32_t id = 0;
         std::chrono::steady_clock::time_point lastMsgTime;
     };
@@ -67,20 +78,21 @@ public:
 
     // --- Управление состоянием процесса ---
     static bool isDeviceBusy();
-    static void startProcess(uint32_t threadId);
+    static void startProcess(uint32_t threadId, uint16_t iport = 0);
     static void watchProcess(const std::string& state, const std::string& thread);
     static void checkProcessTimeout(); // <-- ДОБАВЛЕНО
 
     static constexpr int RX_TIMEOUT_MS = 5000; // таймаут разблокировки
 
     static bool isRxBusy();
-    static void watchTransport(const std::string& state, uint32_t id);
+    static void watchTransport(const std::string& state, uint32_t id, bool uplink = false);
     static void checkRxTimeout();
 
 };
 
 extern MsgParser parser;
 extern MsgParser::RunningProcess runningProc;
-extern MsgParser::RxTransaction rxTransaction;
+//extern MsgParser::RxTransaction rxTransaction;
+extern MsgParser::RxTxTransaction rxtxTransaction;
 
 #endif // MSGPARSER_H

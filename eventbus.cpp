@@ -88,7 +88,33 @@ void EventBus::stop() {
 }
 
 
+std::string EventBus::initSubscriber(){
+    // Формируем JSON для netprofile
+    json netprofile;
 
+    // Получаем все контакты
+    std::vector<Addressbook::Contact> contacts;
+    Addressbook::getInstance().getContacts(contacts);
+    json contactsArray = json::array();
+    for (const auto& contact : contacts) {
+        json c;
+        c["ip"] = contact.ipString();
+        c["id"] = contact.id;
+        c["key"] = contact.key;
+        if(contact.myOwn) c["myOwn"] = 1;
+        c["name"] = contact.name;
+        // Можно добавить дополнительные поля по мере необходимости
+        contactsArray.push_back(c);
+    }
+
+    netprofile["netprofile"]["contacts"] = contactsArray;
+    //Log::info("EventBus", "initSubscriber: ", netprofile.dump());
+    // Отправляем через emit — только тем, кто подписался на "netprofile"
+    //emit(netprofile.dump());
+
+    return netprofile.dump();
+
+}
 
 void EventBus::readerLoop() {
     //char buf[65536];
@@ -105,15 +131,8 @@ void EventBus::readerLoop() {
                              (sockaddr*)&from, &fl);
         if (n <= 0) continue;
 
-        // ИСПРАВЛЕНО: бинарно-безопасное создание строки
-        // Старый код: buf[n] = '\0'; std::string text(buf);  <-- обрезает на нулевых байтах
-        // Новый код:
-        std::string text(recvBuf_.data(), n);  // строка точной длины n
 
-        //ssize_t n = recvfrom(sock_, buf, sizeof(buf) - 1, 0, (sockaddr*)&from, &fl);
-        //if (n <= 0) continue;
-        //buf[n] = '\0';
-        //std::string text(buf);
+        std::string text(recvBuf_.data(), n);
 
         // ============================================================
         // ВАРИАНТ 1: JSON-запрос (начинается с '{')
@@ -135,6 +154,7 @@ void EventBus::readerLoop() {
                 continue;
             }
 
+
             // ШАГ 1: запрос на подписку — ключ "subscribe" со значением-массивом
             if (j.contains("subscribe") && j["subscribe"].is_array()) {
                 // Извлекаем только строковые элементы массива
@@ -145,72 +165,49 @@ void EventBus::readerLoop() {
                     }
                 }
 
+
+                //bool wantsNetProfile = false;
                 if (!topics.empty()) {
                     // Регистрируем подписчика (если его ещё нет)
                     subscribe(from.sin_addr.s_addr, ntohs(from.sin_port));
 
+
                     // Обновляем список топиков у существующей записи
-                    std::lock_guard<std::mutex> lk(mtx_);
+                    //std::lock_guard<std::mutex> lk(mtx_);
+
                     for (auto& sub : msgSubscribers) {
                         if (sub.ip == from.sin_addr.s_addr && sub.port == ntohs(from.sin_port)) {
                             sub.topics = topics;
+                            sub.name = j.contains("name") ? j["name"].dump() : "none";
                             sub.active = true;
-                            break;
-                        }
-                    }
-
-                    // Логируем итоговый список топиков
-                    std::string topicsStr;
-                    for (const auto& t : topics) {
-                        if (!topicsStr.empty()) topicsStr += ", ";
-                        topicsStr += t;
-                    }
-                    Log::info("EventBus", "✅ Подписка на порту ", ntohs(from.sin_port),
-                              ", темы : [", topicsStr, "]");
-
-                    // НОВОЕ: Проверяем, подписан ли клиент на "netprofile"
-                    //bool wantsNetProfile = false;
-                    for (const std::string& topic : topics) {
-
-                        Log::info("EventBus", topic);
-                        if (topic == "netprofile") {
-                            Log::info("EventBus", "netprofile");
-                            //wantsNetProfile = true;
                             //break;
-                        //}
-                    //}
-
-                    // НОВОЕ: Отправляем инициализационное сообщение
-                    //if (wantsNetProfile) {
-
-                        // Формируем JSON для netprofile
-                        json netprofile;
-
-                        // Получаем все контакты
-                        std::vector<Addressbook::Contact> contacts;
-                        Addressbook::getInstance().getContacts(contacts);
-                        json contactsArray = json::array();
-                        for (const auto& contact : contacts) {
-                            json c;
-                            c["ip"] = contact.ipString();
-                            c["id"] = contact.id;
-                            c["key"] = contact.key;
-                            if(contact.myOwn) c["myOwn"] = 1;
-                            c["name"] = contact.name;
-                            // Можно добавить дополнительные поля по мере необходимости
-                            contactsArray.push_back(c);
                         }
-                        netprofile["contacts"] = contactsArray;
 
-                        // Отправляем через emit — только тем, кто подписался на "netprofile"
-                        emit(netprofile.dump());
-                        Log::info("EventBus", "📤 Отправлен netprofile на порт ", ntohs(from.sin_port));
-                    }}
+                        std::string tps;
+                        for(auto& t : topics) tps += t + ",";
+
+                        Log::info("Eventbus", " - port: ", sub.port, ", name: ", sub.name, ", topics: ", tps);
+                    }
+
+
+
+
 
 
                 } else {
                     Log::warn("EventBus", "⚠️ Ключ \"subscribe\" есть, но массив топиков пуст: ", text);
                 }
+
+                // НОВОЕ: Отправляем инициализационное сообщение
+                //if (wantsNetProfile){
+                    //Log::info("EventBus", "wantsNetProfile");
+
+                //в любом случае отправить прицельно
+                emit(initSubscriber(), ntohs(from.sin_port));
+                //}
+
+
+
                 continue;
             }
 
@@ -238,9 +235,12 @@ void EventBus::readerLoop() {
         // ВАРИАНТ 3: бинарный PW-пакет
         // ============================================================
         if (n >= 7) {
+
             uint32_t ipNetworkOrder;
             //std::memcpy(&ipNetworkOrder, buf, 4);
             std::memcpy(&ipNetworkOrder, text.data(), 4);
+
+
 
             char ipStr[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &ipNetworkOrder, ipStr, INET_ADDRSTRLEN);
@@ -256,9 +256,28 @@ void EventBus::readerLoop() {
                     pumsg.what = "toss";
                     pumsg.howmuch = destContact.id;
                     pumsg.msg = parser.encodeMsg(payload);
+                    //pumsg.thread = std::rand() % 10000000;
+                    pumsg.thread = std::rand() % 10000000;
+                    pumsg.initiator = from.sin_port;
                     parser.packMessage(&pumsg);
 
+                    /*
+                    json tossSent = {
+                        {"process", {
+                            {"just_sent", 1},
+                            {"thread", pumsg.thread},
+                            {"nexthop_ip", ipStr}
+                        }}
+                    };
+
+                    //это отправка в шину прицельно на порт отправителя
+                    emit(tossSent.dump(), from.sin_port);
+                    */
+
+                    //Это отправка в устройство
                     wsclient.sendMessage(&pumsg, false);
+
+
                     Log::info("EventBus", "Binary toss -> IP:", ipStr, " (ID:", destContact.id, ") size:", payload.size(), " bytes");
                 } else {
                     Log::error("EventBus", "Binary toss -> IP:", ipStr, " не найден в адресной книге");
@@ -281,7 +300,8 @@ void EventBus::subscribe(uint32_t ip, uint16_t port) {
     sub.port = port;
     sub.active = true;
     msgSubscribers.push_back(sub);
-    Log::info("EventBus", "Новый подписчик, всего: ", msgSubscribers.size());
+    Log::info("EventBus", "Новый сервис подписан на сообщения: ", msgSubscribers.size());
+
 }
 
 void EventBus::unsubscribe(uint32_t ip, uint16_t port) {
@@ -316,7 +336,7 @@ static std::string bytesToHex(const std::vector<uint8_t>& data) {
     return res;
 }
 
-void EventBus::emit(const std::string& rawJson) {
+void EventBus::emit(const std::string& rawJson, const uint16_t port) {
     // ШАГ 1: парсим
 
     json j;
@@ -365,9 +385,28 @@ void EventBus::emit(const std::string& rawJson) {
     // ШАГ 4: единообразная маршрутизация по ключам верхнего уровня
     std::lock_guard<std::mutex> lk(mtx_);
 
+
+
     //размотать всех подписчиков и если в их интересах этот топик есть в жсоне - отправить.
     for (const auto& s : msgSubscribers) {
         if (!s.active) continue;
+
+        //указан порт, отправка только на него
+        if(port > 0){
+            //Log::info("Emit", "Указан порт ", port);
+            if(port != s.port){
+                continue;
+            }
+
+        }
+
+        //Порт зачинщика записан в раннинг проц, индивидуальная отправка
+        if(runningProc.running && runningProc.initiator > 0)
+            if(runningProc.initiator != s.port)
+                continue;
+
+
+
 
         //размотать топики подписчика
         for (const auto& topic : s.topics) {
@@ -378,7 +417,10 @@ void EventBus::emit(const std::string& rawJson) {
                 to.sin_addr.s_addr = s.ip;
                 to.sin_port = htons(s.port);
 
-                //И отправить весь жсон, если это там есть
+
+                // ПРИЦЕЛЬНАЯ ОТПРАВКА
+                // Если идет процесс, и если задан инициатор, и если это не инициатор - пропустить.
+
                 sendto(sock_, out.data(), out.size(), 0, (sockaddr*)&to, sizeof(to));
                 break; // одно сообщение — одна отправка подписчику
             }

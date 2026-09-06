@@ -13,6 +13,7 @@
 struct EventSubscriber {
     uint32_t ip;      // сетевой порядок
     uint16_t port;
+    std::string name;
     std::vector<std::string> topics; // на что подписан
     bool active = true;
 };
@@ -26,7 +27,7 @@ public:
     // Сама определяет топики по ключам верхнего уровня
     // ("transport", "process", "radio", "addressbook", ...)
     // и рассылает сообщение подписчикам с совпавшим топиком.
-    static void emit(const std::string& rawJson);
+    static void emit(const std::string& rawJson, const uint16_t port = 0);
 
     // Подписки
     static void subscribe(uint32_t ip, uint16_t port);
@@ -35,6 +36,7 @@ public:
 
 private:
     static void readerLoop();
+    static std::string initSubscriber(); //отправка инициализационного сообщения подписчику
 
     static int sock_;
     static std::thread thr_;
