@@ -433,6 +433,7 @@ void File::prepareWaitingPackets(int maxPwp) {
         //
 
         // Разбор имени каталога: <destIp>-<uuid> (в IP точки, дефис только перед uuid)
+        
         std::string dirName = dirEntry.path().filename().string();
         size_t dash = dirName.rfind('-');
         if (dash == std::string::npos) continue;

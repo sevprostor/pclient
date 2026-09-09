@@ -37,7 +37,7 @@ bool Transport::init(uint16_t driverPort) {
 
     // Подписка на нужные ключи верхнего уровня
     std::string sub =
-        "{\"subscribe\": [\"words\", \"transport\", \"process\", \"netprofile\", \"TX\", \"RX\"], \"name\":\"slowpost\"}";
+        "{\"subscribe\": [\"words\", \"transport\", \"process\", \"netprofile\", \"tx\", \"rx\"], \"name\":\"slowpost\"}";
     sendto(sock_, sub.c_str(), sub.size(), 0, (sockaddr*)&bus, sizeof(bus));
 
 

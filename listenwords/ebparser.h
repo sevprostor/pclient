@@ -30,6 +30,9 @@ public:
     static void wordsTopic(const EBMessage&, File&);
     static void processTopic(const EBMessage&, File&);
     static void netprofileTopic(const EBMessage&, File&);
+    static void rxtxTopic(const EBMessage&);
+    static void transportTopic(const EBMessage&, File&);
+
 
 private:
 

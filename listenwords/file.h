@@ -64,6 +64,28 @@ public:
     // spool/<part>-<total>-<retries>-<destIp>-<uuid>.pwp
     void prepareWaitingPackets(int maxPwp = 4);
 
+
+
+    // НОВОЕ: получить список .pwp файлов
+    struct PwpFile {
+        fs::path path;
+        int part;
+        int total;
+        int retries;
+        std::string destIp;
+        uint32_t uuid;
+        uint64_t timeCreated;
+    };
+    std::vector<PwpFile> getPwpFiles();
+
+    // НОВОЕ: удалить .pwp файл
+    void removePwp(const fs::path& path);
+
+    // НОВОЕ: переименовать .pwp, увеличив счётчик ретраев
+    void incrementPwpRetry(const fs::path& path);
+
+
+
 private:
     // <workDir>/<myIp>/outbox/spool/
     fs::path getSpoolBase() const;

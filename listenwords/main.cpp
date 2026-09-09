@@ -6,11 +6,25 @@
 #include "file.h"
 #include "ebparser.h"
 #include "ebparser.h"
+
+#include "process.h"
 #include <string>
 #include <thread>
 #include <fstream>
+#include <random>
+
 //File file;
 Config config;
+
+// Глобальное состояние для отслеживания процессов
+// переделать на runningProc
+
+RunningProcess runningProc;
+
+//uint64_t g_currentThread = 0;
+//std::string g_processState = "";
+//std::chrono::steady_clock::time_point g_lastProcessComplete;
+//bool g_processActive = false;
 
 //Words words;
 //File file;
@@ -70,19 +84,22 @@ int main(int argc, char** argv) {
             auto candidates = file.scanOutboxAll();
 
             // 2+3. Новый spool — только если в spool < 4 каталогов передач
-            if (!candidates.empty() && file.countSpoolTransfers() < 4) {
+            if (!candidates.empty() && file.countSpoolTransfers() < config.maxTransfers) {
+
                 auto oldest = std::min_element(candidates.begin(), candidates.end(),
                                                [](const File::OutboxFile& a, const File::OutboxFile& b) {
                                                    return a.timeCreated < b.timeCreated;
                                                });
-                file.spoolFile(*oldest, 2000);
+                //file.spoolFile(*oldest, 2000);
+                file.spoolFile(*oldest, config.chunkSize);
+
             }
 
             // 4. Готовим .pwp — только если в spool нет активных пакетов.
             // ВАЖНО: шаг 4 живёт вне проверки candidates: передачи могут
             // доготавливаться, даже когда outbox уже пуст
             if (file.countPwpFiles() == 0) {
-                file.prepareWaitingPackets(4);
+                file.prepareWaitingPackets(config.maxTransfers);
             }
 
             // Процессы теперь приходят адресно - чужой процесс сюда не придет
@@ -95,6 +112,127 @@ int main(int argc, char** argv) {
             // 2. Когда процесс с нашим тредом закончится ОК или ФЕЙЛ, запомнить время.
             //  - при неудаче переименовать файл, добавив ретрай. Чтобы он стал самым новым в папке
             //  - при успехе удалить пвп
+
+
+
+            // 5. ОТПРАВКА: если процесс не активен и прошло достаточно времени
+            //if (!g_processActive) {
+            if(!runningProc.running && !config.driverState.busy){
+
+                auto now = std::chrono::steady_clock::now();
+                //auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastProcessComplete).count();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - runningProc.lastProcessCompleted).count();
+
+                // Задержка: sendTXDelay + random(0..sendTXDelay/2)
+                static std::random_device rd;
+                static std::mt19937 gen(rd());
+                int delay = config.sendTXDelay + (gen() % (config.sendTXDelay / 2 + 1));
+
+                ////////////////////////////////////////////////////
+                ///
+                /// Начало рабочего такта отправки
+                ///
+
+                if (elapsed >= delay) {
+
+
+                    // Удаляем .pwp с retries > maxProcessRetries
+                    // Просматривается количество ретраев в имени файла "part-total-retries-file.name"
+                    auto pwpFiles = file.getPwpFiles();
+                    for (const auto& pwp : pwpFiles) {
+                        if (pwp.retries > config.maxProcessRetries) {
+                            Log::warn("ListenWords", "❌ .pwp превысил лимит ретраев, удаляем: ",
+                                      pwp.path.string());
+                            file.removePwp(pwp.path);
+                        }
+                    }
+
+                    // Обновляем список после удаления
+                    pwpFiles = file.getPwpFiles();
+
+                    if (!pwpFiles.empty()) {
+                        // Берём самый старый .pwp
+                        const auto& oldest = pwpFiles.front();
+
+                        // Читаем содержимое .pwp
+                        std::ifstream in(oldest.path.string(), std::ios::binary);
+                        if (in) {
+                            std::vector<uint8_t> packet((std::istreambuf_iterator<char>(in)),
+                                                        std::istreambuf_iterator<char>());
+                            in.close();
+
+                            // Отправляем
+                            if (transport.sendFrame(oldest.destIp, packet)){
+
+                                Log::info("ListenWords", "📤 Отправлен .pwp: ", oldest.path.filename().string(),
+                                          " (part ", oldest.part + 1, "/", oldest.total,
+                                          ", uuid=", oldest.uuid, ")");
+
+
+                                //Начать новый процесс
+                                //Запомнить, с каким файлом идет работа.
+                                runningProc.processingUUID = oldest.uuid;
+                                runningProc.running = true;
+                                runningProc.state = "";
+
+
+
+                                //Сразу приписать к имени новый ретрай
+                                //В случае успеха надо будет просто удалить, иначе - прибавить еще ретрай
+                                file.incrementPwpRetry(oldest.path);
+
+                            } else {
+                                Log::error("ListenWords", "❌ Ошибка отправки .pwp");
+
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Процесс активен — проверяем завершение
+                //if (g_processState == "OK" || g_processState == "FAIL") {
+                if (runningProc.state == "OK" || runningProc.state == "FAIL") {
+                    //g_lastProcessComplete = std::chrono::steady_clock::now();
+                    runningProc.lastProcessCompleted = std::chrono::steady_clock::now();
+                    //g_processActive = false;
+                    runningProc.running = false;
+
+                    // Находим соответствующий .pwp
+                    auto pwpFiles = file.getPwpFiles();
+                    for (const auto& pwp : pwpFiles) {
+
+                        Log::info("ListenWords", "смотрим pwp - ", pwp.uuid, " proc - ", runningProc.thread);
+
+
+                        if (pwp.uuid == runningProc.processingUUID) {
+
+
+
+                            //Если процесс завершился неудачей, то не делать вообще ничего:
+                            //файл уже переименован (incrementPwpRetry() сразу после отправки)
+
+                            //В случае успеха - отрапортовать и удалить pwp
+
+                            if (runningProc.state == "OK") {
+                                Log::info("ListenWords", "✅ .pwp успешно отправлен, удаляем: ",
+                                          pwp.path.filename().string());
+                                file.removePwp(pwp.path);
+                            }
+
+
+                            //else {
+                            //    Log::warn("ListenWords", "⚠️ .pwp не отправлен, увеличиваем retry: ",
+                            //              pwp.path.filename().string());
+                            //    file.incrementPwpRetry(pwp.path);
+                            //}
+                            break;
+                        }
+                    }
+
+                    runningProc.thread = 0;
+                    runningProc.state = "";
+                }
+            }
         }
 
         // Задержка между итерациями главного цикла

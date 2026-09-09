@@ -5,9 +5,12 @@
 #include "../libs/json.hpp"
 #include "words.h"
 #include "file.h"
+#include "process.h"
 #include <string>
 
 using json = nlohmann::json;
+
+//RunningProcess runningProc;
 
 //File file;
 
@@ -17,9 +20,182 @@ void EBParser::parseEmsg(const EBMessage& msg, File& file) {
     json j = json::parse(msg.rawtext, nullptr, false);
     if (j.is_discarded()) return;
 
+    //Log::info("EventBus", msg.rawtext);
+
     if (j.contains("netprofile")) netprofileTopic(msg, file);
     if (j.contains("words")) wordsTopic(msg, file);
-    //if (j.contains("process")) processTopic(msg);
+    if (j.contains("process")) processTopic(msg, file);
+    if (j.contains("rx") || j.contains("tx")) rxtxTopic(msg);
+    if (j.contains("transport")) transportTopic(msg, file);
+
+}
+
+
+void EBParser::transportTopic(const EBMessage& msg, File& file) {
+
+    static uint32_t lastId = 0;
+    static std::chrono::steady_clock::time_point lastStart;
+
+
+    json j = json::parse(msg.rawtext, nullptr, false);
+    if (j.is_discarded()) return;
+
+    if (!j.contains("transport") || !j["transport"].is_object()) return;
+
+    const auto& tr = j["transport"];
+
+    // Извлекаем основные поля
+    uint32_t id = tr.value("id", (uint32_t)0);
+
+    if(lastId != id){
+        lastId = id;
+        lastStart = std::chrono::steady_clock::now();
+    }
+
+    uint64_t parent = 0;
+    if (tr.contains("parent")) {
+        if (tr["parent"].is_number()) {
+            parent = tr["parent"].get<uint64_t>();
+        } else if (tr["parent"].is_string()) {
+            try { parent = std::stoull(tr["parent"].get<std::string>()); } catch (...) {}
+        }
+    }
+
+    uint16_t pair = static_cast<uint16_t>(tr.value("pair", 0));
+    std::string state = tr.value("state", std::string("UNKNOWN"));
+    int speed = tr.value("speed", 0);
+
+    // Извлекаем проценты из uplink или downlink
+    int currentPart = 0;
+    int totalParts = 0;
+    std::string direction = "";
+
+    if (tr.contains("uplink") && tr["uplink"].is_object()) {
+        const auto& uplink = tr["uplink"];
+        totalParts = uplink.value("total", 0);
+        if (uplink.contains("TX") && uplink["TX"].is_object()) {
+            currentPart = uplink["TX"].value("part", 0);
+            direction = "TX";
+        }
+    } else if (tr.contains("downlink") && tr["downlink"].is_object()) {
+        const auto& downlink = tr["downlink"];
+        totalParts = downlink.value("total", 0);
+        if (downlink.contains("RX") && downlink["RX"].is_object()) {
+            currentPart = downlink["RX"].value("part", 0);
+            direction = "RX";
+        }
+    }
+
+    // Вычисляем процент
+    int percent = 0;
+    if (totalParts > 0) {
+        percent = (currentPart * 100) / totalParts;
+    }
+
+    // Находим IP пира по pair (ID)
+    std::string peerIp = "unknown";
+    for (const auto& contact : config.addressbook) {
+        if (contact.mac == pair) {
+            peerIp = contact.ip;
+            break;
+        }
+    }
+
+    //id = 0;
+    // Вычисление реальной скорости
+    uint32_t realBPS = 0;
+    if (currentPart > 0) {
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - lastStart).count();
+
+        if (elapsedMs > 0) {
+            // Переданные байты = чанков * размер чанка
+            uint64_t bytesSent = static_cast<uint64_t>(currentPart) * (config.chunkSize / totalParts);
+
+            // Байт в секунду: bytesSent * 1000 / ms
+            realBPS = static_cast<uint32_t>((bytesSent * 1000) / elapsedMs);
+        }
+    }
+
+    // Логируем информацию
+    Log::info("EBParser", "📡 Transport: ", direction, " [", pair, ":", peerIp, "] ",
+              currentPart + 1, "/", totalParts, " (", percent, "%) ",
+              "speed=", speed, " abs, Bps=", realBPS, "B/s");
+
+}
+
+void EBParser::rxtxTopic(const EBMessage& msg) {
+
+    json j = json::parse(msg.rawtext, nullptr, false);
+    if (j.is_discarded()) return;
+
+    Log::info("EventBus", "Begin RX...");
+
+    if (!j.contains("rx") || !j.contains("tx")) return;
+
+    if (j.contains("rx") && j["rx"].is_object()){
+        if(j["rx"]["state"] == "UP"){
+            config.driverState.RX = true;
+            config.driverState.busy = true;
+            Log::info("EventBus", "Begin RX...");
+        }
+        if(j["rx"]["state"] == "DOWN"){
+            config.driverState.RX = false;
+            config.driverState.busy = false;
+            Log::info("EventBus", "End RX.");
+        }
+    }
+
+    if (j.contains("tx")){
+        if(j["tx"]["state"] == "UP"){
+            config.driverState.TX = true;
+            config.driverState.busy = true;
+            Log::info("EventBus", "Begin TX...");
+        }
+        if(j["tx"]["state"] == "DOWN"){
+            config.driverState.TX = false;
+            config.driverState.busy = false;
+            Log::info("EventBus", "End TX...");
+        }
+    }
+
+
+}
+
+void EBParser::processTopic(const EBMessage& msg, File& file) {
+
+    json j = json::parse(msg.rawtext, nullptr, false);
+    if (j.is_discarded()) return;
+
+    if (!j.contains("process") || !j["process"].is_object()) return;
+
+    const auto& proc = j["process"];
+    uint64_t thread = 0;
+    if (proc.contains("thread")) {
+        if (proc["thread"].is_number()) {
+            thread = proc["thread"].get<uint64_t>();
+        } else if (proc["thread"].is_string()) {
+            thread = std::stoull(proc["thread"].get<std::string>());
+        }
+    }
+
+    std::string state;
+    if (proc.contains("state") && proc["state"].is_string()) {
+        state = proc["state"].get<std::string>();
+    }
+
+    Log::info("EBParser", "📋 Process thread=", thread, ", state=", state);
+
+    // Сохраняем состояние в глобальной переменной (будет использоваться в main)
+    //extern uint64_t g_currentThread;
+    //extern std::string g_processState;
+
+    //extern RunningProcess runningProc;
+
+    //g_currentThread = thread;
+    //g_processState = state;
+    runningProc.thread = thread;
+    runningProc.state = state;
 }
 
 void EBParser::netprofileTopic(const EBMessage& msg, File& file) {
