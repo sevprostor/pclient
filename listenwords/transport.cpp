@@ -37,30 +37,9 @@ bool Transport::init(uint16_t driverPort) {
 
     // Подписка на нужные ключи верхнего уровня
     std::string sub =
-        "{\"subscribe\": [\"words\", \"transport\", \"process\", \"netprofile\"]}";
+        "{\"subscribe\": [\"words\", \"transport\", \"process\", \"netprofile\", \"TX\", \"RX\"], \"name\":\"slowpost\"}";
     sendto(sock_, sub.c_str(), sub.size(), 0, (sockaddr*)&bus, sizeof(bus));
 
-    // ============================================================
-    // Блокирующе ждём netprofile от драйвера (максимум 5 секунд)
-    // ============================================================
-    /*
-    inited_ = false;
-    const int timeoutMs = 5000;
-    const int pollIntervalMs = 50;
-    int elapsedMs = 0;
-
-    while (!inited_ && elapsedMs < timeoutMs) {
-        poll(pollIntervalMs);   // читаем шину; если придёт netprofile — inited_ станет true
-        elapsedMs += pollIntervalMs;
-    }
-
-    if (!inited_) {
-        // Таймаут: закрываем сокет и сигнализируем об ошибке
-        ::close(sock_);
-        sock_ = -1;
-        return false;
-    }
-    */
 
     return true;
 }

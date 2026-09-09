@@ -53,7 +53,21 @@ public:
     // исходный файл удалить. Возвращает uuid (0 = ошибка)
     uint32_t spoolFile(const OutboxFile& of, int chunkSize = 2000);
 
+    // НОВОЕ: сколько каталогов передач в spool (ограничитель шага 3)
+    int countSpoolTransfers() const;
+
+    // НОВОЕ: сколько *.pwp лежит в корне spool (ограничитель шага 4)
+    int countPwpFiles() const;
+
+    // НОВОЕ: шаг 4 — из каждого <destIp>-<uuid> взять самый старый чанк,
+    // перенести в waiting/, обернуть в PW-пакет и сохранить как
+    // spool/<part>-<total>-<retries>-<destIp>-<uuid>.pwp
+    void prepareWaitingPackets(int maxPwp = 4);
+
 private:
+    // <workDir>/<myIp>/outbox/spool/
+    fs::path getSpoolBase() const;
+
     // <workDir>/<myIp>/outbox/spool/<destIp>-<uuid>/
     fs::path getSpoolDir(const std::string& destIp, uint32_t uuid) const;
 

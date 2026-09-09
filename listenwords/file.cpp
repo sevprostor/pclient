@@ -229,7 +229,7 @@ static uint64_t fileTimeToEpoch(const fs::path& p) {
         std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count());
 }
 
-fs::path File::getSpoolDir(const std::string& destIp, uint32_t uuid) const {
+/*fs::path File::getSpoolDir(const std::string& destIp, uint32_t uuid) const {
     // <workDir>/<myIp>/outbox/spool/<destIp>-<uuid>/
     fs::path base = config.workDir;
     base /= config.myContact.ip.empty() ? "unknown" : config.myContact.ip;
@@ -237,7 +237,7 @@ fs::path File::getSpoolDir(const std::string& destIp, uint32_t uuid) const {
     base /= "spool";
     base /= destIp + "-" + std::to_string(uuid);
     return base;
-}
+}*/
 
 // ============================================================
 // Обход каталогов контактов: по 1 самому старому файлу из каждого.
@@ -324,9 +324,14 @@ uint32_t File::spoolFile(const OutboxFile& of, int chunkSize) {
         std::streamsize end = std::min(start + chunkSize, fileSize);
         std::streamsize size = end - start; // может быть 0 для пустого файла
 
+
+
+
+        // Имя чанка: <part>-<totalParts>-<retries>-<filename>, ретраи пока 0
         std::string chunkName = std::to_string(part) + "-" +
-                                std::to_string(totalParts) + "-" + of.filename;
+                                std::to_string(totalParts) + "-0-" + of.filename;
         fs::path chunkPath = spoolDir / chunkName;
+
 
         std::ofstream out(chunkPath.string(), std::ios::binary | std::ios::trunc);
         if (!out) {
@@ -350,3 +355,138 @@ uint32_t File::spoolFile(const OutboxFile& of, int chunkSize) {
     return uuid;
 }
 
+#include "words.h" // для buildFileFrame
+
+fs::path File::getSpoolBase() const {
+    fs::path base = config.workDir;
+    base /= config.myContact.ip.empty() ? "unknown" : config.myContact.ip;
+    base /= "outbox";
+    base /= "spool";
+    return base;
+}
+
+fs::path File::getSpoolDir(const std::string& destIp, uint32_t uuid) const {
+    return getSpoolBase() / (destIp + "-" + std::to_string(uuid));
+}
+
+int File::countSpoolTransfers() const {
+    fs::path base = getSpoolBase();
+    std::error_code ec;
+    if (!fs::exists(base, ec)) return 0;
+    int n = 0;
+    for (const auto& e : fs::directory_iterator(base, ec))
+        if (e.is_directory()) n++; // waiting/ лежит глубже, здесь только передачи
+    return n;
+}
+
+int File::countPwpFiles() const {
+    fs::path base = getSpoolBase();
+    std::error_code ec;
+    if (!fs::exists(base, ec)) return 0;
+    int n = 0;
+    for (const auto& e : fs::directory_iterator(base, ec))
+        if (e.is_regular_file() && e.path().extension() == ".pwp") n++;
+    return n;
+}
+
+void File::prepareWaitingPackets(int maxPwp) {
+    fs::path base = getSpoolBase();
+    std::error_code ec;
+    if (!fs::exists(base, ec)) return;
+
+    // Обходим все каталоги передач <destIp>-<uuid>
+    for (const auto& dirEntry : fs::directory_iterator(base, ec)) {
+        if (!dirEntry.is_directory()) continue;
+
+        // Лимит: не больше maxPwp готовых пакетов
+        if (countPwpFiles() >= maxPwp) return;
+
+        // Разбор имени каталога: <destIp>-<uuid> (в IP точки, дефис только перед uuid)
+        std::string dirName = dirEntry.path().filename().string();
+        size_t dash = dirName.rfind('-');
+        if (dash == std::string::npos) continue;
+        std::string destIp = dirName.substr(0, dash);
+        uint32_t uuid = 0;
+        try { uuid = std::stoul(dirName.substr(dash + 1)); } catch (...) { continue; }
+
+        // Ищем самый старый чанок в корне каталога (waiting/ — каталог, пропускается)
+        // Имя чанка: <part>-<total>-<retries>-<filename>
+        struct Cand { fs::path path; int part, total, retries; std::string fname; uint64_t t; };
+        std::vector<Cand> cands;
+
+        for (const auto& ce : fs::directory_iterator(dirEntry.path(), ec)) {
+            if (!ce.is_regular_file()) continue;
+            std::string name = ce.path().filename().string();
+
+            size_t d1 = name.find('-');
+            size_t d2 = name.find('-', d1 + 1);
+            size_t d3 = name.find('-', d2 + 1);
+            if (d1 == std::string::npos || d2 == std::string::npos || d3 == std::string::npos) continue;
+
+            try {
+                Cand c;
+                c.part    = std::stoi(name.substr(0, d1));
+                c.total   = std::stoi(name.substr(d1 + 1, d2 - d1 - 1));
+                c.retries = std::stoi(name.substr(d2 + 1, d3 - d2 - 1));
+                c.fname   = name.substr(d3 + 1);
+                c.path    = ce.path();
+                c.t       = fileTimeToEpoch(ce.path());
+                cands.push_back(c);
+            } catch (...) { continue; }
+        }
+        if (cands.empty()) continue; // всё уже в waiting/ или отправлено
+
+        // Самый старый; при равенстве времени — меньший номер части
+        auto best = std::min_element(cands.begin(), cands.end(),
+                                     [](const Cand& a, const Cand& b) {
+                                         if (a.t != b.t) return a.t < b.t;
+                                         return a.part < b.part;
+                                     });
+
+        // Читаем содержимое чанка
+        std::ifstream in(best->path.string(), std::ios::binary);
+        if (!in) continue;
+        std::vector<uint8_t> content((std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>());
+        in.close();
+
+        // Оборачиваем в PW-пакет: магик + frame
+        std::vector<uint8_t> frame = Words::buildFileFrame(
+            config.myContact.mac,                       // sender
+            uuid,                                       // uuid передачи
+            best->fname,                                // имя файла
+            static_cast<uint8_t>(best->total),          // totalParts
+            static_cast<uint8_t>(best->part),           // part
+            content);                                   // содержимое чанка
+
+        std::vector<uint8_t> packet;
+        packet.reserve(3 + frame.size());
+        packet.push_back('P');
+        packet.push_back('W');
+        packet.push_back(0x01);
+        packet.insert(packet.end(), frame.begin(), frame.end());
+
+        // Переносим чанок в waiting/ (резервная копия для ретраев)
+        fs::path waitingDir = dirEntry.path() / "waiting";
+        ensureDir(waitingDir);
+        fs::rename(best->path, waitingDir / best->path.filename(), ec);
+
+        // Сохраняем готовый пакет: <part>-<total>-<retries>-<destIp>-<uuid>.pwp
+        std::string pwpName = std::to_string(best->part) + "-" +
+                              std::to_string(best->total) + "-" +
+                              std::to_string(best->retries) + "-" +
+                              destIp + "-" + std::to_string(uuid) + ".pwp";
+        fs::path pwpPath = base / pwpName;
+
+        std::ofstream out(pwpPath.string(), std::ios::binary | std::ios::trunc);
+        if (!out) {
+            Log::error("File", "❌ Не удалось создать .pwp: ", pwpPath.string());
+            continue;
+        }
+        out.write(reinterpret_cast<const char*>(packet.data()),
+                  static_cast<std::streamsize>(packet.size()));
+        out.close();
+
+        Log::info("File", "📦 .pwp подготовлен: ", pwpName);
+    }
+}
