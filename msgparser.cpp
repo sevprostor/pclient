@@ -182,6 +182,13 @@ void MsgParser::dispatchIncomingPacket(const msgpack::object& obj) {
 
     }
 
+    // Обработка FHSS - блокировать на 3 секунды
+    //auto thisIsFHSS = root_map.find("FHSS");
+    //if (thisIsFHSS != root_map.end()){
+
+
+    //}
+
     // Обработка транспорта
     auto thisIsTransport = root_map.find("transport");
     if (thisIsTransport != root_map.end() && thisIsTransport->second.type == msgpack::type::MAP) {
@@ -418,7 +425,17 @@ void MsgParser::checkProcessTimeout() {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                            currentTime - runningProc.lastResponseTime).count();
         if (elapsed >= 8000) {
-            Log::error("Process", "Таймаут завершения (5000 мс) для процесса ", runningProc.thread);
+            Log::error("Process", "Таймаут завершения (8000 мс) для процесса ", runningProc.thread);
+
+            nlohmann::json procFailed = {
+                {"process", {
+                    {"thread", runningProc.thread},
+                    {"state", "FAIL"}
+                            }}
+            };
+
+
+            EventBus::emit(procFailed.dump());
             runningProc.running = false;
         }
     }
@@ -441,10 +458,10 @@ void MsgParser::watchTransport(const std::string& state, uint32_t id, bool uplin
             //Сразу сообщить об этом в шину
 
             if(uplink){
-                EventBus::emit("{\"TX\":1}");
+                EventBus::emit("{\"tx\":{\"state\":\"UP\"}}");
                 Log::info("Process", "Исходящая транзакция ", id);
             } else {
-                EventBus::emit("{\"RX\":1}");
+                EventBus::emit("{\"rx\":{\"state\":\"UP\"}}");
                 Log::info("Process", "📥 Входящая транзакция ", id, " началась. TX заблокирован.");
             }
         }
@@ -457,16 +474,16 @@ void MsgParser::watchTransport(const std::string& state, uint32_t id, bool uplin
     } else if (state == "OK" || state == "FAIL") {
         if (rxtxTransaction.active) {
             //Сразу сообщить об этом в шину
-            EventBus::emit("{\"RX\":0}");
+            //EventBus::emit("{\"rx\":0}");
 
 
             if(uplink){
 
-                EventBus::emit(std::string("{\"TX\":0, \"state\":\"" + state +"\"}"));
+                EventBus::emit(std::string("{\"tx\":{\"state\":\"DOWN\"}}"));
                 Log::info("Process", "Исходящая транзакция ", id, " завершена (", state, "). TX разблокирован.");
             } else {
 
-                EventBus::emit(std::string("{\"RX\":0, \"state\":\"" + state +"\"}"));
+                EventBus::emit(std::string("{\"rx\":{\"state\":\"DOWN\"}}"));
                 Log::info("Process", "📥 Входящая транзакция ", id, " завершена (", state, "). TX разблокирован.");
             }
         }

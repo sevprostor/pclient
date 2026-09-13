@@ -86,6 +86,7 @@ public:
 
     static bool isRxBusy();
     static void watchTransport(const std::string& state, uint32_t id, bool uplink = false);
+    //static void watchRadioSwitchLock(const std::string& state, uint32_t id, bool uplink = false);
     static void checkRxTimeout();
 
 };

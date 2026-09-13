@@ -21,7 +21,7 @@ public:
 
     static constexpr int PING_INTERVAL_MS = 3000;
     static constexpr int KEEPALIVE_TIMEOUT_MS = 10000;
-    static constexpr int POST_RX_GUARD_MS = 500;
+    static constexpr int POST_RX_GUARD_MS = 1000;
     static constexpr int PASSED_TIMEOUT_MS = 500;
     //static constexpr int PASSED_RESEND_MS = 2000;
 

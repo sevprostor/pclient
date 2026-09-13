@@ -228,9 +228,10 @@ void TCPclient::readerLoop() {
                 if (frame.size() == 1 && frame[0] == 'X') {
                     // Станция перенастраивается или ведет приемопередачу
                     // с этим надо чтото сделать
+                    this->lastReceiveTime = std::chrono::steady_clock::now();
                     this->messageBuffer.push(this->sentMessage);
                     Log::error("TCPclient", "Станция занята, сообщение добавлено в очередь");
-                    EventBus::emit("radio_busy");
+                    //EventBus::emit("radio_busy");
 
                 } else
 
@@ -379,7 +380,8 @@ void TCPclient::sendMessage(MsgParser::PuhegUpperMessage* pumsg, bool forceSend)
     }
 
     if (!isDeviceBusy) {
-        MsgParser::startProcess(pumsg->thread);
+        //сюда нужно дотянуть порт клиента
+        MsgParser::startProcess(pumsg->thread, pumsg->initiator);
     }
 
     sendWithLength(pumsg->packedMsg);

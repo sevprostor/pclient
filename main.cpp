@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
 
             //При первом подключении синхронизировать время на станции и инициализировать клиент
             wsclient.sendTimeSync();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            std::this_thread::sleep_for(std::chrono::seconds(5));
             //MsgParser mParser;
 
             MsgParser::PuhegUpperMessage pumsg;

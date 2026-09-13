@@ -258,7 +258,7 @@ void EventBus::readerLoop() {
                     pumsg.msg = parser.encodeMsg(payload);
                     //pumsg.thread = std::rand() % 10000000;
                     pumsg.thread = std::rand() % 10000000;
-                    pumsg.initiator = from.sin_port;
+                    pumsg.initiator = ntohs(from.sin_port); //from.sin_port;
                     parser.packMessage(&pumsg);
 
                     /*
@@ -346,7 +346,7 @@ void EventBus::emit(const std::string& rawJson, const uint16_t port) {
         Log::error("EventBus", "emit: ошибка парсинга JSON: ", e.what());
         return;
     }
-    if (!j.is_object()) return;
+    //if (!j.is_object()) return;
 
     // ШАГ 2: метка времени
     j["ts"] = static_cast<long long>(time(nullptr));
