@@ -76,7 +76,8 @@ int main(int argc, char** argv) {
 
     while (true) {
         EBMessage emsg = transport.poll(100);
-        if (emsg.evenbus) EBParser::parseEmsg(emsg, file);
+        if (emsg.evenbus) EBParser::parseEmsg(emsg, file); //поправить название!
+
 
         // Если адресная книга загружена — сканируем outbox и отправляем файлы
         if (!config.addressbook.empty()) {
@@ -179,7 +180,7 @@ int main(int argc, char** argv) {
 
                                 //Сразу приписать к имени новый ретрай
                                 //В случае успеха надо будет просто удалить, иначе - прибавить еще ретрай
-                                file.incrementPwpRetry(oldest.path);
+                                //file.incrementPwpRetry(oldest.path);
 
                             } else {
                                 Log::error("ListenWords", "❌ Ошибка отправки .pwp");
@@ -208,15 +209,61 @@ int main(int argc, char** argv) {
 
 
 
-                            //Если процесс завершился неудачей, то не делать вообще ничего:
-                            //файл уже переименован (incrementPwpRetry() сразу после отправки)
+                            //Если процесс завершился неудачей, то переименовать ретрай и больше ничего не делать
+                            if (runningProc.state == "FAIL"){
+                                file.incrementPwpRetry(pwp.path);
+                            }
 
                             //В случае успеха - отрапортовать и удалить pwp
-
                             if (runningProc.state == "OK") {
-                                Log::info("ListenWords", "✅ .pwp успешно отправлен, удаляем: ",
+
+                                Log::info("ListenWords", "✅ .pwp успешно отправлен: ",
                                           pwp.path.filename().string());
+
+                                // === ПРОВЕРКА: это файл пруфа? ===
+                                // Имя .pwp: <part>-<total>-<retries>-<chunkName>.pwp
+                                // Отсекаем .pwp, смотрим расширение имени чанка
+                                std::string pwpName = pwp.path.filename().string();
+                                // Убираем расширение .pwp
+                                size_t dotPwp = pwpName.rfind(".pwp");
+                                std::string chunkName = (dotPwp != std::string::npos)
+                                                            ? pwpName.substr(0, dotPwp)
+                                                            : pwpName;
+
+                                // Ищем последний дефис (перед именем чанка)
+                                size_t lastDash = chunkName.rfind('-');
+                                std::string originalFilename = (lastDash != std::string::npos)
+                                                                   ? chunkName.substr(lastDash + 1)
+                                                                   : chunkName;
+
+                                // Получаем расширение оригинального файла (регистронезависимо)
+                                std::string ext = fs::path(originalFilename).extension().string();
+                                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+                                bool isProofFile = (ext == ".pwproof");
+
+                                if (isProofFile) {
+                                    Log::info("ListenWords", "📋 Это файл пруфа, сразу в approved");
+
+                                    // Сразу перемещаем чанок из waiting в approved
+                                    //file.approveChunk(pwp.uuid, pwp.part);
+                                    std::vector<uint8_t> parts;
+                                    parts.emplace_back(pwp.part);
+                                    //Делаем вид, будто получили пруф.
+                                    file.processIncomingProof(pwp.uuid, parts);
+
+                                    // Удаляем .pwp
+                                    //file.removePwp(pwp.path);
+                                } else {
+                                    // Обычный файл — ждём пруф от получателя
+                                    Log::info("ListenWords", "⏳ Ожидание пруфа от получателя");
+                                }
+
+
+
+                                Log::info("ListenWords", "✅ .pwp успешно отправлен, удаляем: ", pwp.path.filename().string());
                                 file.removePwp(pwp.path);
+
                             }
 
 
@@ -225,6 +272,7 @@ int main(int argc, char** argv) {
                             //              pwp.path.filename().string());
                             //    file.incrementPwpRetry(pwp.path);
                             //}
+
                             break;
                         }
                     }
@@ -236,7 +284,7 @@ int main(int argc, char** argv) {
         }
 
         // Задержка между итерациями главного цикла
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
 

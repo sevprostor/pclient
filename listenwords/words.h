@@ -20,15 +20,20 @@ struct Envelope {
 //   name (nameSize) | uuid (3) | totalParts (1) | part (1) | content (...)
 struct PwFile {
     Envelope   env;
-    uint8_t    proofType  = 0;
+    uint8_t    proofType  = 0; // убрать
     std::string name;
-    uint32_t   uuid       = 0;
-    uint8_t    totalParts = 0;
-    uint8_t    part       = 0;
+    uint32_t   uuid       = 0; // переделать на полные 32 бит - 4 байта
+    uint8_t    totalParts = 0; // убрать, есть в имени
+    uint8_t    part       = 0; // то же самое
     std::vector<uint8_t> content;
 };
 
-struct PwProof   { Envelope env; /* TODO */ };
+struct PwProof   {
+    Envelope env;
+    std::string name;
+    uint32_t uuid = 0; // переделать на полные 32 бит - 4 байта
+    std::vector<uint8_t> content; //номера частей, которые подтверждаются этим пруфом
+};
 struct PwCommand { Envelope env; /* TODO */ };
 
 // ===========================================================================
@@ -44,7 +49,7 @@ public:
     bool parseFile(const std::vector<uint8_t>& data, PwFile& file) const;
 
     // Заглушки на будущее
-    bool parseProof(const std::vector<uint8_t>& data, PwProof& proof) const;
+    //bool parseProof(const std::vector<uint8_t>& data, PwProof& proof) const;
     bool parseCommand(const std::vector<uint8_t>& data, PwCommand& cmd) const;
 
     // Утилита: hex-строка -> байты

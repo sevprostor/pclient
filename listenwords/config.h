@@ -15,7 +15,7 @@ struct Config {
     // НОВОЕ: параметры отправки
     int sendTXDelay = 15000;        // задержка между отправками (мс)
     int maxProcessRetries = 2;     // максимальное количество ретраев
-    uint16_t chunkSize = 1500;
+    uint16_t chunkSize = 2000;
     uint8_t maxTransfers = 4;
 
     struct abc{
@@ -44,6 +44,8 @@ struct Config {
         uint16_t bytesRcvd;
         uint16_t avgBps;
     } driverState;
+
+    uint16_t proofTimeout = 1200; //20 минут ждем пруфа
 };
 
 extern Config config;

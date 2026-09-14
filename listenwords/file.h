@@ -84,9 +84,15 @@ public:
     // НОВОЕ: переименовать .pwp, увеличив счётчик ретраев
     void incrementPwpRetry(const fs::path& path);
 
-
+    // НОВОЕ: обработка входящего пруфа (файл "PF")
+    // Переносит подтверждённые чанки из waiting/ в approved/
+    bool processIncomingProof(uint32_t uuid, const std::vector<uint8_t>& approvedParts);
+    bool incrementApprove(uint32_t uuid);
 
 private:
+
+    static uint64_t fileTimeToEpoch(const fs::path& p);
+
     // <workDir>/<myIp>/outbox/spool/
     fs::path getSpoolBase() const;
 
@@ -98,7 +104,9 @@ private:
     fs::path getOutgoingDir(const std::string& contactIp, uint32_t uuid) const;
 
     // Путь к директории входящих файлов: <workDir>/<myIp>/inbox/<senderIp>/
-    fs::path getInboxDir(uint16_t senderId) const;
+    //fs::path getInboxDir(uint16_t senderId) const;
+    fs::path getInboxDir(const std::string& senderIp) const;
+
 
     // Путь к директории исходящих файлов: <workDir>/<myIp>/outbox/<contactIp>/
     fs::path getOutboxDir(const std::string& contactIp) const;

@@ -129,7 +129,7 @@ void EBParser::rxtxTopic(const EBMessage& msg) {
     json j = json::parse(msg.rawtext, nullptr, false);
     if (j.is_discarded()) return;
 
-    Log::info("EventBus", "Begin RX...");
+    Log::info("EventBus", "rxtxTopic: ", msg.rawtext);
 
     if (!j.contains("rx") || !j.contains("tx")) return;
 
@@ -187,13 +187,8 @@ void EBParser::processTopic(const EBMessage& msg, File& file) {
     Log::info("EBParser", "📋 Process thread=", thread, ", state=", state);
 
     // Сохраняем состояние в глобальной переменной (будет использоваться в main)
-    //extern uint64_t g_currentThread;
-    //extern std::string g_processState;
 
-    //extern RunningProcess runningProc;
 
-    //g_currentThread = thread;
-    //g_processState = state;
     runningProc.thread = thread;
     runningProc.state = state;
 }
@@ -274,6 +269,8 @@ void EBParser::wordsTopic(const EBMessage& msg, File& file){
                       " sender=", pwFile.env.sender,
                       " content=", pwFile.content.size(), " байт");
 
+            // 1. Просмотреть inbox/<sender>/uuid - переделать на IP-адрес!
+
             // Сборка файла
             if (file.assembleFile(pwFile)) {
                 Log::info("ListenWords", "✅ Файл полностью получен!");
@@ -281,13 +278,13 @@ void EBParser::wordsTopic(const EBMessage& msg, File& file){
         }
         break;
     }
-    case '0': {
+    /*case '0': {
         PwProof proof;
         if (words.parseProof(body, proof)) {
             Log::info("ListenWords", "🔑 PROOF от sender=", proof.env.sender);
         }
         break;
-    }
+    }*/
     case 'C': {
         PwCommand cmd;
         if (words.parseCommand(body, cmd)) {

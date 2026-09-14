@@ -20,7 +20,9 @@ add_executable(listenwords main.cpp
     ebparser.h
     ebparser.cpp
     process.h
-    process.cpp)
+    process.cpp
+    proof.h
+    proof.cpp)
 
 include(GNUInstallDirs)
 install(TARGETS listenwords

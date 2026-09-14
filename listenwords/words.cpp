@@ -1,6 +1,7 @@
 #include "words.h"
 #include "log.h"
 
+
 std::vector<uint8_t> Words::hexToBytes(const std::string& hex) {
     std::vector<uint8_t> bytes;
     bytes.reserve(hex.size() / 2);
@@ -46,25 +47,47 @@ bool Words::parseFile(const std::vector<uint8_t>& data, PwFile& file) const {
     pos += nameSize;
 
     // 4. uuid (3 байта)
+
     if (pos + 3 > data.size()) return false;
     file.uuid = static_cast<uint32_t>((data[pos] << 16) | (data[pos+1] << 8) | data[pos+2]);
     pos += 3;
 
+    // Если этот uuid есть в inbox/... и имя файла равно "PF" - значит разобрать это как пруф
+    // Proof::parseProof(PwProof), и выйти
+
+    //////////////////////////////////////////////////////////////////////////////////////
     // 5. totalParts и part
+    // убрать весь этот блок из пакета, а .totalParts и .part парсить прямо здесь из file.name
+
     if (pos + 2 > data.size()) return false;
     file.totalParts = data[pos++];
     file.part       = data[pos++];
+
+    //
+    //
+    ////////////////////////////////////////////////////////////////////////////////////////
 
     // 6. content — всё оставшееся
     file.content.assign(data.begin() + pos, data.end());
     return true;
 }
 
+/*
+// Перенести это в proof.cpp
 bool Words::parseProof(const std::vector<uint8_t>& data, PwProof& proof) const {
     if (!parseEnvelope(data, proof.env)) return false;
     // TODO: поля proof
+
+    // Это все происходит в рамках процесса ОТПРАВКИ
+    //
+    // Proof - это точно такой же F-пакет. В нем указано uuid идущей передачи,
+    // а в имени файла - "PF". Содержимое файла - байты с номерами полученных частей.
+    // Если в outbox/<senderIp>/<uuid>/waiting/ есть части, упомянутые в пруфе,
+    // то перенести их в outbox/<senderIp>/<uuid>/approved/
+
+
     return true;
-}
+}*/
 
 bool Words::parseCommand(const std::vector<uint8_t>& data, PwCommand& cmd) const {
     if (!parseEnvelope(data, cmd.env)) return false;
